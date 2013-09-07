@@ -1,4 +1,4 @@
 CloudySwitch
 ============
 
-CloudySwitch is OpenFlow controller using Ryu controller. Runs on OpenFlow 1.3
+CloudySwitch is OpenFlow controller using [Ryu](https://github.com/osrg/ryu) controller. Runs on OpenFlow 1.3
