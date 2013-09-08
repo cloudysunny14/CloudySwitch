@@ -25,7 +25,7 @@ from ryu.controller.handler import CONFIG_DISPATCHER
 from ryu.controller.handler import MAIN_DISPATCHER
 from ryu.ofproto.ofproto_v1_2 import OFPG_ANY
 from ryu.ofproto.ofproto_v1_3 import OFP_VERSION
-from ryu.lib.mac import haddr_to_str, DONTCARE
+from ryu.lib.mac import DONTCARE_STR
 from ryu.lib.port_no import port_no_to_str
 from ryu.lib.dpid import dpid_to_str
 from ryu.ofproto.ether import ETH_TYPE_LLDP
@@ -43,7 +43,7 @@ class L2Switch(RyuApp):
 
     DEFAULT_TTL = 120
     OFP_VERSIONS = [OFP_VERSION]
-    LLDP_PACKET_LEN = len(LLDPPacket.lldp_packet(0, 0, DONTCARE, 0))
+    LLDP_PACKET_LEN = len(LLDPPacket.lldp_packet(0, 0, DONTCARE_STR, 0))
     LLDP_SEND_GUARD = .05
     LLDP_SEND_PERIOD_PER_PORT = .9
     TIMEOUT_CHECK_PERIOD = 30.
@@ -93,17 +93,19 @@ class L2Switch(RyuApp):
                 break
 
             for port in ports_now:
-                self.send_lldp_packet(port)
+                self.send_lldp_packet(port.dpid, 
+                                      port.port_no,
+                                      port.hw_addr)
             for port in ports:
-                self.send_lldp_packet(port)
+                self.send_lldp_packet(port.dpid,
+                                      port.port_no,
+                                      port.hw_addr)
                 hub.sleep(self.LLDP_SEND_GUARD)      # don't burst
 
             if timeout is not None and ports:
                 timeout = 0     # We have already slept
-            LOG.debug('lldp sleep %s', timeout)
             self.lldp_event.wait(timeout=timeout)
   
-
     def link_loop(self):
         while self.is_active:
             self.link_event.clear()
@@ -255,7 +257,11 @@ class L2Switch(RyuApp):
         req = ofp_parser.OFPBarrierRequest(datapath)
         datapath.send_msg(req)
 
-    def send_lldp_packet(self, datapath, port_no, dl_addr):
+    def send_lldp_packet(self, datapath_id, port_no, dl_addr):
+        datapath = self.dps.get(datapath_id, None)
+        if datapath is None:
+            #datapath was already deleted
+            return
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
         lldp_data = LLDPPacket.lldp_packet(datapath.id,
@@ -279,12 +285,13 @@ class L2Switch(RyuApp):
         self.port_state[datapath.id] = PortState()
         for p in body:
             self.port_state[datapath.id].add(p.port_no, p)
-            self.send_lldp_packet(datapath, p.port_no, haddr_to_str(p.hw_addr))
+            self.send_lldp_packet(datapath.id, p.port_no,
+                                  p.hw_addr)
             port = self._get_port(datapath.id, p.port_no)
             if port and not port.is_reserved():
                 self._port_added(port)
                 self.lldp_event.set()
-            
+
     def send_port_desc_stats_request(self, datapath):
         ofp_parser = datapath.ofproto_parser
         req = ofp_parser.OFPPortDescStatsRequest(datapath, 0)
@@ -331,13 +338,7 @@ class L2Switch(RyuApp):
         if not self.link_discovery:
             return
         msg = ev.msg
-        fields = msg.match.fields
-        datapath = msg.datapath
-        ofproto = datapath.ofproto
-        
-        for f in fields:
-            if f.header == ofproto.OXM_OF_IN_PORT:
-                in_port = f.value
+        in_port = msg.match['in_port']
         
         try:
             src_dpid, src_port_no = LLDPPacket.lldp_parse(msg.data)
@@ -429,7 +430,7 @@ class Port(object):
     def to_dict(self):
         return {'dpid': dpid_to_str(self.dpid),
                 'port_no': port_no_to_str(self.port_no),
-                'hw_addr': haddr_to_str(self.hw_addr),
+                'hw_addr': self.hw_addr,
                 'name': self.name.rstrip('\0')}
 
     # for Switch.del_port()
