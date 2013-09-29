@@ -76,25 +76,8 @@ class SwitchEventHandler(app_manager.RyuApp):
         switch_src.linked_status[port_src.port_no] = True
         switch_dst.linked_status[port_dst.port_no] = True
 
-    def handle_arp_packet(self, arppkt, dpid, port_no):
-        #Fetch from dst_ip
-        src_port = db.fetch('SELECT * FROM arp_table WHERE mac_addr = \'%s\''\
-                            % (arppkt.src_mac))
-        if not len(src_port):
-            src_port = (dpid, port_no, arppkt.src_mac, arppkt.src_ip)
-            db.execute('INSERT INTO arp_table (dpid, port_no, mac_addr,\
-                        ip_addr) VALUES (\'%s\', \'%s\', \'%s\', \'%s\')'\
-                        % src_port)
-            src_port = [src_port]
-            
-        dst_port = db.fetch('SELECT * FROM arp_table WHERE ip_addr = \'%s\''\
-                            % (arppkt.dst_ip))
-        if len(dst_port):
-            self.process_route(src_port[0], dst_port[0])
-
     def process_route(self, src_port, dst_port):
         path_list = PathList(self.link_list)
-        LOG.info('%s, %s' % (src_port, dst_port))
         paths = path_list.createWholePath(src_port[0], dst_port[0])
         LOG.info(paths)
 
@@ -109,7 +92,11 @@ class SwitchEventHandler(app_manager.RyuApp):
         arppkt = packet.next()
         if arppkt.opcode == arp.ARP_REQUEST or\
            arppkt.opcode == arp.ARP_REPLY:
-            self.handle_arp_packet(arppkt, datapath.id, in_port)
+            try:
+                src_port, dst_port = db.handle_arp_packet(arppkt, datapath.id, in_port)
+                self.process_route(src_port, dst_port)
+            except db.ArpTableNotFoundException:
+                pass
 
         for switch in self.switches.values():
             for port_no, status in switch.linked_status.items():
