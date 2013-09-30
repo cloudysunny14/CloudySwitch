@@ -71,9 +71,9 @@ class PathList(object):
             graph[src_dpid] = linked_nodes
         return graph
 
-    def createWholePath(self, src_port, dst_port):
+    def createWholePath(self, src_dpid, dst_dpid):
         graph = self._createGraph(self.link_list)
-        paths = find_all_paths(graph, src_port.dpid, dst_port.dpid)
+        paths = find_all_paths(graph, src_dpid, dst_dpid)
         path_ports = []
         for path in paths:
             ports = []

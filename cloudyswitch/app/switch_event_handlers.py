@@ -19,11 +19,12 @@ import logging
 from ryu.base import app_manager
 from ryu.ofproto.ofproto_v1_2 import OFPG_ANY
 from ryu.controller import handler
-from ryu.topology import event
 from ryu.ofproto.ether import ETH_TYPE_ARP
 from ryu.lib.packet import arp
 from ryu.lib.packet.ethernet import ethernet
 from ryu.lib.packet.packet import Packet
+
+import event
 import db
 from topology_util import PathList
 

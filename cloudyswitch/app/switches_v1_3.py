@@ -33,8 +33,9 @@ from ryu.topology.switches import Port, PortState
 from ryu.topology.switches import PortDataState
 from ryu.topology.switches import Link, LinkState
 from ryu.topology.switches import Switch
-from ryu.topology import event
 from ryu.lib import hub
+
+import event
 
 LOG = logging.getLogger("switches_v1_3")
 
