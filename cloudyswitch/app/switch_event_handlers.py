@@ -23,10 +23,16 @@ from ryu.ofproto.ether import ETH_TYPE_ARP
 from ryu.lib.packet import arp
 from ryu.lib.packet.ethernet import ethernet
 from ryu.lib.packet.packet import Packet
-
+from ryu.ofproto import ether
+from ryu import utils
+from ryu.controller import ofp_event
+from ryu.controller.handler import CONFIG_DISPATCHER
+from ryu.controller.handler import MAIN_DISPATCHER
+from ryu.controller.handler import HANDSHAKE_DISPATCHER
 import event
 import db
 from topology_util import PathList
+from ryu.controller.handler import set_ev_cls
 
 LOG = logging.getLogger(__name__)
 
@@ -44,7 +50,6 @@ class SwitchEventHandler(app_manager.RyuApp):
         super(SwitchEventHandler, self).__init__(*args, **kwargs)
         db.clean_tables()
         self.switches = {}
-        self.arp_table = {}
         self.link_list = []
 
     @handler.set_ev_cls(event.EventSwitchEnter)
@@ -55,8 +60,7 @@ class SwitchEventHandler(app_manager.RyuApp):
         #send flow_mod_message
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
-        match = parser.OFPMatch()
-        match.set_dl_type(ETH_TYPE_ARP)
+        match = parser.OFPMatch(eth_type=ETH_TYPE_ARP)
         output = parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                         self.ARP_PACKET_LEN)
         write = parser.OFPInstructionActions(ofproto.OFPIT_WRITE_ACTIONS,
@@ -65,7 +69,15 @@ class SwitchEventHandler(app_manager.RyuApp):
         flow_mod = self.create_flow_mod(datapath, 0, 0,
                                         match, instructions)
         datapath.send_msg(flow_mod)
-        #db.insert()
+
+    @set_ev_cls(ofp_event.EventOFPErrorMsg,
+                    [HANDSHAKE_DISPATCHER, CONFIG_DISPATCHER, MAIN_DISPATCHER])
+    def error_msg_handler(self, ev):
+        msg = ev.msg
+
+        self.logger.debug('OFPErrorMsg received: type=0x%02x code=0x%02x '
+                              'message=%s',
+                              msg.type, msg.code, utils.hex_array(msg.data))
 
     @handler.set_ev_cls(event.EventLinkAdd)
     def link_add_handler(self, link):
@@ -77,10 +89,109 @@ class SwitchEventHandler(app_manager.RyuApp):
         switch_src.linked_status[port_src.port_no] = True
         switch_dst.linked_status[port_dst.port_no] = True
 
+    def create_push_label_flow(self, dp, label, in_port, out_port):
+        parser = dp.ofproto_parser
+        ofproto = dp.ofproto
+        eth_MPLS = ether.ETH_TYPE_MPLS
+        eth_IP = ether.ETH_TYPE_IP
+        match = parser.OFPMatch(in_port=in_port, eth_type=eth_MPLS)
+        actions = [parser.OFPActionPushMpls(eth_MPLS),
+                   parser.OFPActionSetField(mpls_label=label),
+                   parser.OFPActionOutput(out_port, 0)]
+        actions_apply = [parser.OFPActionPopMpls(eth_IP)]
+        insts = [parser.OFPInstructionActions(ofproto.OFPIT_WRITE_ACTIONS,
+                                              actions),
+                 parser.OFPInstructionActions(dp.ofproto.OFPIT_APPLY_ACTIONS,
+                                              actions_apply)]
+        flow_mod = self.create_flow_mod(dp, 0, 1, match, insts)
+        dp.send_msg(flow_mod)
+
+        match = parser.OFPMatch(in_port=in_port)
+        actions = [parser.OFPActionPushMpls(eth_MPLS)]
+        insts = [dp.ofproto_parser.OFPInstructionActions(
+                 dp.ofproto.OFPIT_APPLY_ACTIONS, actions),
+                 dp.ofproto_parser.OFPInstructionGotoTable(1)] 
+        flow_mod = self.create_flow_mod(dp, 0, 0, match, insts) 
+        dp.send_msg(flow_mod)
+
+    def create_swap_label_flow(self, dp, prev_label, label, out_port):
+        parser = dp.ofproto_parser
+        ofproto = dp.ofproto
+        eth_MPLS = ether.ETH_TYPE_MPLS
+        eth_IP = ether.ETH_TYPE_IP
+        match = parser.OFPMatch(eth_type=eth_MPLS,
+                                mpls_label=prev_label)
+        actions = [parser.OFPActionPushMpls(eth_MPLS),
+                   parser.OFPActionSetField(mpls_label=label),
+                   parser.OFPActionOutput(out_port, 0)]
+        actions_apply = [parser.OFPActionPopMpls(eth_IP)]
+        insts = [parser.OFPInstructionActions(ofproto.OFPIT_WRITE_ACTIONS,
+                                              actions),
+                 parser.OFPInstructionActions(dp.ofproto.OFPIT_APPLY_ACTIONS,
+                                              actions_apply)]
+        flow_mod = self.create_flow_mod(dp, 0, 0, match, insts)
+        dp.send_msg(flow_mod)
+
+    def create_pop_label_flow(self, dp, label, out_port):
+        parser = dp.ofproto_parser
+        eth_IP = ether.ETH_TYPE_IP
+        eth_MPLS = ether.ETH_TYPE_MPLS
+        match = parser.OFPMatch(eth_type=eth_MPLS,
+                                mpls_label=label)
+        actions = [parser.OFPActionPopMpls(eth_IP)]
+        insts = [parser.OFPInstructionActions(dp.ofproto.OFPIT_APPLY_ACTIONS,
+                                              actions),
+                 parser.OFPInstructionGotoTable(1)]
+        flow_mod = self.create_flow_mod(dp, 0, 0, match, insts)
+        dp.send_msg(flow_mod)
+
     def process_route(self, src_port, dst_port):
         path_list = PathList(self.link_list)
         paths = path_list.createWholePath(src_port[0], dst_port[0])
-        LOG.info(paths)
+        path_ids = db.handle_paths(paths, src_port, dst_port)
+        LOG.debug(path_ids)
+        #selected shortest path
+        label_flows = db.fetch_label_flows(path_ids[0][0])
+        LOG.debug(label_flows)
+        last_label = 0
+        for label_flow in label_flows:
+            target_switch = self.switches[label_flow[1]].switch
+            if label_flow[6] == -1 and not label_flow[7]:
+                #Push label entry
+                self.create_push_label_flow(target_switch.dp,
+                                            label_flow[5], src_port[1],
+                                            label_flow[2])
+            elif not label_flow[7]:
+                #Swap label entry
+                self.create_swap_label_flow(target_switch.dp,
+                                            label_flow[6], label_flow[5],
+                                            label_flow[2])
+            last_label = label_flow[5]
+        #Pop label entry
+        if last_label: 
+            target_switch = self.switches[dst_port[0]].switch
+            self.create_pop_label_flow(target_switch.dp, last_label,
+                                       dst_port[1])
+                
+
+    def broadcast_to_end_nodes(self, msg):
+        for switch in self.switches.values():
+            for port_no, status in switch.linked_status.items():
+                if status == False:
+                    self.arp_packet_out(switch.switch.dp, port_no, msg.data)
+
+    def process_end_hw_addr_flows(self, port):
+        eth_IP = ether.ETH_TYPE_IP
+        target_switch = self.switches[port[0]] 
+        datapath = target_switch.switch.dp
+        hw_addr = port[2]
+        ofproto = datapath.ofproto
+        actions = [datapath.ofproto_parser.OFPActionOutput(port[1])]
+        match = datapath.ofproto_parser.OFPMatch(eth_type=eth_IP, eth_dst=hw_addr)
+        inst = [datapath.ofproto_parser.OFPInstructionActions(
+                ofproto.OFPIT_APPLY_ACTIONS, actions)]
+        flow_mod = self.create_flow_mod(datapath, 0, 1, match, inst)
+        datapath.send_msg(flow_mod)
 
     @handler.set_ev_cls(event.EventArpReceived)
     def arp_received_handler(self, ev):
@@ -89,21 +200,22 @@ class SwitchEventHandler(app_manager.RyuApp):
         datapath = msg.datapath
         in_port = msg.match['in_port']
         packet = Packet(msg.data)
-        efm = packet.next()
+        packet.next()
         arppkt = packet.next()
+        #TODO This is incorrect ??
         if arppkt.opcode == arp.ARP_REQUEST or\
-           arppkt.opcode == arp.ARP_REPLY:
-            try:
-                src_port, dst_port = db.handle_arp_packet(arppkt, datapath.id, in_port)
-                self.process_route(src_port, dst_port)
-            except db.ArpTableNotFoundException:
-                pass
-
-        for switch in self.switches.values():
-            for port_no, status in switch.linked_status.items():
-                if status == False:
-                    self.arp_packet_out(switch.switch.dp, port_no, msg.data)
-
+            arppkt.opcode == arp.ARP_REPLY:
+            self.broadcast_to_end_nodes(msg)
+             
+        try:
+            src_port, dst_port = db.handle_arp_packet(arppkt, datapath.id, in_port)
+            self.process_end_hw_addr_flows(src_port)
+            self.process_end_hw_addr_flows(dst_port)
+            self.process_route(src_port, dst_port)
+            self.process_route(dst_port, src_port)
+        except db.ArpTableNotFoundException:
+            pass      
+        
     def arp_packet_out(self, datapath, port_no, data):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
@@ -125,5 +237,6 @@ class SwitchEventHandler(app_manager.RyuApp):
                                                       ofproto.OFPP_ANY,
                                                       OFPG_ANY, 0,
                                                       match, instructions)
+        #LOG.info(flow_mod.to_jsondict())
         return flow_mod
  

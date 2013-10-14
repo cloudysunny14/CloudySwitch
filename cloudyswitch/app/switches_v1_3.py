@@ -78,6 +78,37 @@ class L2Switch(RyuApp):
             self.link_event.set()
             hub.joinall(self.threads)
 
+    def send_flow_stats_request(self, datapath):
+        ofp = datapath.ofproto
+        ofp_parser = datapath.ofproto_parser
+
+        cookie = cookie_mask = 0
+        match = ofp_parser.OFPMatch()
+        req = ofp_parser.OFPFlowStatsRequest(datapath, 0,
+                                         ofp.OFPTT_ALL,
+                                         ofp.OFPP_ANY, ofp.OFPG_ANY,
+                                         cookie, cookie_mask,
+                                         match)
+        datapath.send_msg(req)
+
+    @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
+    def flow_stats_reply_handler(self, ev):
+        flows = []
+        for stat in ev.msg.body:
+            flows.append('table_id=%s '
+                     'duration_sec=%d duration_nsec=%d '
+                     'priority=%d '
+                     'idle_timeout=%d hard_timeout=%d flags=0x%04x '
+                     'cookie=%d packet_count=%d byte_count=%d '
+                     'match=%s instructions=%s' %
+                     (stat.table_id,
+                      stat.duration_sec, stat.duration_nsec,
+                      stat.priority,
+                      stat.idle_timeout, stat.hard_timeout, stat.flags,
+                      stat.cookie, stat.packet_count, stat.byte_count,
+                      stat.match, stat.instructions))
+        LOG.debug('FlowStats: %s', flows)
+
     def lldp_loop(self):
         while self.is_active:
             self.lldp_event.clear()
@@ -118,17 +149,17 @@ class L2Switch(RyuApp):
             now = time.time()
             deleted = []
             for (link, timestamp) in self.links.items():
-                LOG.debug('%s timestamp %d (now %d)', link, timestamp, now)
                 if timestamp + self.LINK_TIMEOUT < now:
                     src = link.src
                     if src in self.ports:
                         port_data = self.ports.get_port(src)
                         if port_data.lldp_dropped() > self.LINK_LLDP_DROP:
                             deleted.append(link)
+                for dp in self.dps.values():
+                    self.send_flow_stats_request(dp)
 
             for link in deleted:
                 self.links.link_down(link)
-                LOG.debug('delete %s', link)
                 self.send_event_to_observers(event.EventLinkDelete(link))
 
                 dst = link.dst
@@ -380,3 +411,4 @@ class L2Switch(RyuApp):
                 else:
                     self.ports.move_front(dst)
                     self.lldp_event.set()
+
