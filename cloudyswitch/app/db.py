@@ -123,8 +123,9 @@ def register_label(path_id, src_port, dst_port, prev_label, target_dst_dpid):
                             dst_port[3], label[0][0], prev_label, False, target_dst_dpid)
     else:
         #common path found
-        execute('UPDATE label_table SET label = %d WHERE label = %d' %
-                 (registered_label[0][6], prev_label))
+        execute('UPDATE label_table SET label = %d WHERE label = %d AND\
+                 path_id = %d' %
+                (registered_label[0][6], prev_label, path_id))
         raise RequiredReFetchException(
               msg='Prev label is update. Require to reretch.') 
         

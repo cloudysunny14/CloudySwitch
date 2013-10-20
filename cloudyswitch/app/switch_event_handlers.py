@@ -52,14 +52,10 @@ class SwitchEventHandler(app_manager.RyuApp):
         self.switches = {}
         self.link_list = []
 
-    @handler.set_ev_cls(event.EventSwitchEnter)
-    def switch_enter_handler(self, event):
-        switch = event.switch
-        datapath = switch.dp
-        self.switches[datapath.id] = SwitchState(switch)
-        #send flow_mod_message
+    def send_default_flow(self, datapath):
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
+        eth_IP = ether.ETH_TYPE_IP
         match = parser.OFPMatch(eth_type=ETH_TYPE_ARP)
         output = parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                         self.ARP_PACKET_LEN)
@@ -69,12 +65,24 @@ class SwitchEventHandler(app_manager.RyuApp):
         flow_mod = self.create_flow_mod(datapath, 0, 0,
                                         match, instructions)
         datapath.send_msg(flow_mod)
+        match = parser.OFPMatch(eth_type=eth_IP)
+        instructions = [parser.OFPInstructionGotoTable(1)]
+        flow_mod = self.create_flow_mod(datapath, 0, 0,
+                                        match, instructions)
+        datapath.send_msg(flow_mod)
+
+    @handler.set_ev_cls(event.EventSwitchEnter)
+    def switch_enter_handler(self, event):
+        switch = event.switch
+        datapath = switch.dp
+        self.switches[datapath.id] = SwitchState(switch)
+        self.send_default_flow(datapath)
+        
 
     @set_ev_cls(ofp_event.EventOFPErrorMsg,
                     [HANDSHAKE_DISPATCHER, CONFIG_DISPATCHER, MAIN_DISPATCHER])
     def error_msg_handler(self, ev):
         msg = ev.msg
-
         self.logger.debug('OFPErrorMsg received: type=0x%02x code=0x%02x '
                               'message=%s',
                               msg.type, msg.code, utils.hex_array(msg.data))
@@ -94,7 +102,7 @@ class SwitchEventHandler(app_manager.RyuApp):
         ofproto = dp.ofproto
         eth_MPLS = ether.ETH_TYPE_MPLS
         eth_IP = ether.ETH_TYPE_IP
-        match = parser.OFPMatch(in_port=in_port, eth_type=eth_MPLS)
+        match = parser.OFPMatch(eth_type=eth_MPLS)
         actions = [parser.OFPActionPushMpls(eth_MPLS),
                    parser.OFPActionSetField(mpls_label=label),
                    parser.OFPActionOutput(out_port, 0)]
@@ -103,15 +111,15 @@ class SwitchEventHandler(app_manager.RyuApp):
                                               actions),
                  parser.OFPInstructionActions(dp.ofproto.OFPIT_APPLY_ACTIONS,
                                               actions_apply)]
-        flow_mod = self.create_flow_mod(dp, 0, 1, match, insts)
+        flow_mod = self.create_flow_mod(dp, 0, 2, match, insts)
         dp.send_msg(flow_mod)
 
-        match = parser.OFPMatch(in_port=in_port)
+        match = parser.OFPMatch(eth_type=eth_IP)
         actions = [parser.OFPActionPushMpls(eth_MPLS)]
         insts = [dp.ofproto_parser.OFPInstructionActions(
                  dp.ofproto.OFPIT_APPLY_ACTIONS, actions),
-                 dp.ofproto_parser.OFPInstructionGotoTable(1)] 
-        flow_mod = self.create_flow_mod(dp, 0, 0, match, insts) 
+                 dp.ofproto_parser.OFPInstructionGotoTable(2)] 
+        flow_mod = self.create_flow_mod(dp, 0, 1, match, insts)
         dp.send_msg(flow_mod)
 
     def create_swap_label_flow(self, dp, prev_label, label, out_port):
@@ -190,7 +198,7 @@ class SwitchEventHandler(app_manager.RyuApp):
         match = datapath.ofproto_parser.OFPMatch(eth_type=eth_IP, eth_dst=hw_addr)
         inst = [datapath.ofproto_parser.OFPInstructionActions(
                 ofproto.OFPIT_APPLY_ACTIONS, actions)]
-        flow_mod = self.create_flow_mod(datapath, 0, 1, match, inst)
+        flow_mod = self.create_flow_mod(datapath, 1, 1, match, inst)
         datapath.send_msg(flow_mod)
 
     @handler.set_ev_cls(event.EventArpReceived)
@@ -202,17 +210,20 @@ class SwitchEventHandler(app_manager.RyuApp):
         packet = Packet(msg.data)
         packet.next()
         arppkt = packet.next()
-        #TODO This is incorrect ??
-        if arppkt.opcode == arp.ARP_REQUEST or\
-            arppkt.opcode == arp.ARP_REPLY:
+        if arppkt.opcode == arp.ARP_REQUEST:
             self.broadcast_to_end_nodes(msg)
-             
+        
         try:
             src_port, dst_port = db.handle_arp_packet(arppkt, datapath.id, in_port)
+            LOG.debug('PATH %s, %s' % (src_port, dst_port))
             self.process_end_hw_addr_flows(src_port)
             self.process_end_hw_addr_flows(dst_port)
-            self.process_route(src_port, dst_port)
-            self.process_route(dst_port, src_port)
+            if src_port[0] != dst_port[0]:
+                self.process_route(src_port, dst_port)
+                self.process_route(dst_port, src_port)
+            if arppkt.opcode == arp.ARP_REPLY:
+                target_switch = self.switches[dst_port[0]].switch
+                self.arp_packet_out(target_switch.dp, dst_port[1], msg.data)
         except db.ArpTableNotFoundException:
             pass      
         
@@ -237,6 +248,6 @@ class SwitchEventHandler(app_manager.RyuApp):
                                                       ofproto.OFPP_ANY,
                                                       OFPG_ANY, 0,
                                                       match, instructions)
-        #LOG.info(flow_mod.to_jsondict())
+        LOG.info(flow_mod.to_jsondict())
         return flow_mod
  

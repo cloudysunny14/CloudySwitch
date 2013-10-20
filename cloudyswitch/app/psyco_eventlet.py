@@ -45,10 +45,8 @@ def eventlet_wait_callback(conn, timeout=-1):
         if state == extensions.POLL_OK:
             break
         elif state == extensions.POLL_READ:
-            LOG.info("POOL_READ") 
             trampoline(conn.fileno(), read=True)
         elif state == extensions.POLL_WRITE:
-            LOG.info("POOL_WRITE")
             trampoline(conn.fileno(), write=True)
         else:
             raise psycopg2.OperationalError(
