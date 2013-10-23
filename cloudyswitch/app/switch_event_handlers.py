@@ -97,12 +97,13 @@ class SwitchEventHandler(app_manager.RyuApp):
         switch_src.linked_status[port_src.port_no] = True
         switch_dst.linked_status[port_dst.port_no] = True
 
-    def create_push_label_flow(self, dp, label, in_port, out_port):
+    def create_push_label_flow(self, dp, label, in_port, out_port,
+                               dst_port):
         parser = dp.ofproto_parser
         ofproto = dp.ofproto
         eth_MPLS = ether.ETH_TYPE_MPLS
         eth_IP = ether.ETH_TYPE_IP
-        match = parser.OFPMatch(eth_type=eth_MPLS)
+        match = parser.OFPMatch(eth_type=eth_MPLS, eth_dst=dst_port[2])
         actions = [parser.OFPActionPushMpls(eth_MPLS),
                    parser.OFPActionSetField(mpls_label=label),
                    parser.OFPActionOutput(out_port, 0)]
@@ -157,19 +158,17 @@ class SwitchEventHandler(app_manager.RyuApp):
         path_list = PathList(self.link_list)
         paths = path_list.createWholePath(src_port[0], dst_port[0])
         path_ids = db.handle_paths(paths, src_port, dst_port)
-        LOG.debug(path_ids)
         #selected shortest path
         label_flows = db.fetch_label_flows(path_ids[0][0])
-        LOG.debug(label_flows)
         last_label = 0
         for label_flow in label_flows:
             target_switch = self.switches[label_flow[1]].switch
-            if label_flow[6] == -1 and not label_flow[7]:
+            if label_flow[6] == -1:
                 #Push label entry
                 self.create_push_label_flow(target_switch.dp,
                                             label_flow[5], src_port[1],
-                                            label_flow[2])
-            elif not label_flow[7]:
+                                            label_flow[2], dst_port)
+            else:
                 #Swap label entry
                 self.create_swap_label_flow(target_switch.dp,
                                             label_flow[6], label_flow[5],
@@ -180,7 +179,6 @@ class SwitchEventHandler(app_manager.RyuApp):
             target_switch = self.switches[dst_port[0]].switch
             self.create_pop_label_flow(target_switch.dp, last_label,
                                        dst_port[1])
-                
 
     def broadcast_to_end_nodes(self, msg):
         for switch in self.switches.values():
@@ -203,7 +201,6 @@ class SwitchEventHandler(app_manager.RyuApp):
 
     @handler.set_ev_cls(event.EventArpReceived)
     def arp_received_handler(self, ev):
-        LOG.info("ARP_RECEIVED")
         msg = ev.ev.msg
         datapath = msg.datapath
         in_port = msg.match['in_port']
@@ -212,10 +209,9 @@ class SwitchEventHandler(app_manager.RyuApp):
         arppkt = packet.next()
         if arppkt.opcode == arp.ARP_REQUEST:
             self.broadcast_to_end_nodes(msg)
-        
+
         try:
             src_port, dst_port = db.handle_arp_packet(arppkt, datapath.id, in_port)
-            LOG.debug('PATH %s, %s' % (src_port, dst_port))
             self.process_end_hw_addr_flows(src_port)
             self.process_end_hw_addr_flows(dst_port)
             if src_port[0] != dst_port[0]:
@@ -248,6 +244,5 @@ class SwitchEventHandler(app_manager.RyuApp):
                                                       ofproto.OFPP_ANY,
                                                       OFPG_ANY, 0,
                                                       match, instructions)
-        LOG.info(flow_mod.to_jsondict())
         return flow_mod
  

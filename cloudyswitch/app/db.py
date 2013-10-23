@@ -109,26 +109,25 @@ def register_label(path_id, src_port, dst_port, prev_label, target_dst_dpid):
     registered_label = fetch('SELECT * FROM label_table WHERE\
                               src_dpid = %d AND src_port_no = %d AND\
                               dst_dpid = %d AND dst_port_no = %d AND\
-                              target_dst_dpid = %d' % 
+                              target_dst_dpid = %d AND prev_label = %d' % 
                               (src_port[2], src_port[3], dst_port[2], dst_port[3],
-                               target_dst_dpid))
+                               target_dst_dpid, prev_label))
     if not len(registered_label):
         execute('INSERT INTO label_table (path_id, src_dpid, src_port_no, \
-                 dst_dpid, dst_port_no, prev_label, entered, target_dst_dpid)\
-                 VALUES (%d, %d, %d, %d, %d, %d, FALSE, %d)' %
+                 dst_dpid, dst_port_no, prev_label, target_dst_dpid)\
+                 VALUES (%d, %d, %d, %d, %d, %d, %d)' %
                  (path_id, src_port[2], src_port[3],
                   dst_port[2], dst_port[3], prev_label, target_dst_dpid))
         label = fetch('SELECT currval(\'label_table_label_seq\')')
         registered_label = (path_id, src_port[2], src_port[3], dst_port[2],
                             dst_port[3], label[0][0], prev_label, False, target_dst_dpid)
     else:
+        registered_label = registered_label[0]
         #common path found
-        execute('UPDATE label_table SET label = %d WHERE label = %d AND\
-                 path_id = %d' %
-                (registered_label[0][6], prev_label, path_id))
-        raise RequiredReFetchException(
-              msg='Prev label is update. Require to reretch.') 
-        
+        if registered_label[6] != -1 and prev_label != -1:
+            execute('UPDATE label_table SET label = %d WHERE label = %d AND\
+                     path_id = %d' %
+                     (registered_label[6], prev_label, path_id))
     return registered_label
         
 def create_port_set(path_ports, num = 2):
@@ -142,18 +141,13 @@ def fetch_label_flows(path_id):
     path_desc = fetch('SELECT * FROM path_desc_table WHERE\
                        path_id = %d ORDER BY path_seq' %
                        (path_id))
-    label_flows = []
     prev_label = -1
     for port_set in create_port_set(path_desc):
         src_port = port_set[0]
         dst_port = port_set[1]
-        try:
-            label_entry = register_label(path_id, src_port,
-                                       dst_port, prev_label, path[0][3])
-            label_flows.append(label_entry)
-            prev_label = label_entry[5]
-        except RequiredReFetchException:
-            pass
+        label_entry = register_label(path_id, src_port,
+                                     dst_port, prev_label, path[0][3])
+        prev_label = label_entry[5]
     commit()
     label_flows = []
     label_flow = fetch('SELECT * FROM label_table WHERE\

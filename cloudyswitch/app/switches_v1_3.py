@@ -155,8 +155,8 @@ class L2Switch(RyuApp):
                         port_data = self.ports.get_port(src)
                         if port_data.lldp_dropped() > self.LINK_LLDP_DROP:
                             deleted.append(link)
-                for dp in self.dps.values():
-                    self.send_flow_stats_request(dp)
+                #for dp in self.dps.values():
+                    #self.send_flow_stats_request(dp)
 
             for link in deleted:
                 self.links.link_down(link)
@@ -385,10 +385,10 @@ class L2Switch(RyuApp):
                 return
 
             old_peer = self.links.get_peer(src)
-            LOG.debug("Packet-In")
-            LOG.debug("  src=%s", src)
-            LOG.debug("  dst=%s", dst)
-            LOG.debug("  old_peer=%s", old_peer)
+            #LOG.debug("Packet-In")
+            #LOG.debug("  src=%s", src)
+            #LOG.debug("  dst=%s", dst)
+            #LOG.debug("  old_peer=%s", old_peer)
             if old_peer and old_peer != dst:
                 old_link = Link(src, old_peer)
                 self.send_event_to_observers(event.EventLinkDelete(old_link))

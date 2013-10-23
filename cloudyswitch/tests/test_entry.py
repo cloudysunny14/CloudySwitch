@@ -36,6 +36,9 @@ class Test_entry(unittest.TestCase):
     """
 
     def setUp(self):
+        db.clean_tables()
+        db.fetch('select setval (\'label_table_label_seq\', 1, false)')
+        db.fetch('select setval (\'path_table_path_id_seq\', 1, false)')
         pass
 
     def tearDown(self):
@@ -83,15 +86,15 @@ class Test_entry(unittest.TestCase):
         path_ids = db.handle_paths(paths, src_port_arp_table,
                                    dst_port_arp_table)
         label_flows = db.fetch_label_flows(path_ids[0][0])
-        #TODO add test method
-        print label_flows
+        eq_([(1, 4, 1, 1, 3, 1, -1, 5), (1, 1, 4, 5, 1, 2, 1, 5)],
+            label_flows)
         paths = self._createPaths(dst_port, src_port)
         path_ids = db.handle_paths(paths, dst_port_arp_table,
                                    src_port_arp_table)
         label_flows = db.fetch_label_flows(path_ids[0][0])
-        eq_([(5, 4, 1, 1, 3, 6, -1, False), (5, 1, 4, 5, 1, 7, 6, False)],
+        eq_([(7, 5, 2, 2, 4, 3, -1, 4), (7, 2, 3, 4, 2, 4, 3, 4)],
             label_flows)
-        
+
         src_port = test_util.createPort(4, 3)
         dst_port = test_util.createPort(3, 3)
         paths = self._createPaths(src_port, dst_port)
@@ -100,8 +103,8 @@ class Test_entry(unittest.TestCase):
         path_ids = db.handle_paths(paths, src_port_arp_table,
                                    dst_port_arp_table)
         label_flows = db.fetch_label_flows(path_ids[0][0])
-        #TODO add test method
-        print label_flows
+        eq_([(13, 4, 1, 1, 3, 5, -1, 3), (13, 1, 2, 3, 1, 6, 5, 3)],
+            label_flows)
 
         src_port = test_util.createPort(5, 3)
         dst_port = test_util.createPort(3, 3)
@@ -111,8 +114,37 @@ class Test_entry(unittest.TestCase):
         path_ids = db.handle_paths(paths, src_port_arp_table,
                                    dst_port_arp_table)
         label_flows = db.fetch_label_flows(path_ids[1][0])
-        #TODO add test method
-        print label_flows
+        eq_([(20, 5, 1, 1, 4, 7, -1, 3), (20, 1, 2, 3, 1, 8, 7, 3)],
+            label_flows)
+
+    def testGroupFlowEntry(self):
+        """
+        src_port = test_util.createPort(4, 3)
+        dst_port = test_util.createPort(5, 3)
+        paths = self._createPaths(src_port, dst_port)
+        p_path = paths[0][0]
+        b_path = paths[0][1]
+        group_flows = db.fetch_group_flows([p_path, b_path])
+
+    def send_group_mod(self, datapath):
+        ofp = datapath.ofproto
+        ofp_parser = datapath.ofproto_parser
+
+        port = 1
+        max_len = 2000
+        actions = [ofp_parser.OFPActionOutput(port, max_len)]
+
+        weight = 100
+        watch_port = 0
+        watch_group = 0
+        buckets = [ofp_parser.OFPBucket(weight, watch_port, watch_group,
+                                    actions)]
+
+        group_id = 1
+        req = ofp_parser.OFPGroupMod(datapath, ofp.OFPFC_ADD,
+                                 ofp.OFPGT_SELECT, group_id, buckets)
+        datapath.send_msg(req)
+        """
 
 if __name__ == '__main__':
     unittest.main()
