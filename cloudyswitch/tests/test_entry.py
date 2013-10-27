@@ -39,6 +39,7 @@ class Test_entry(unittest.TestCase):
         db.clean_tables()
         db.fetch('select setval (\'label_table_label_seq\', 1, false)')
         db.fetch('select setval (\'path_table_path_id_seq\', 1, false)')
+        db.fetch('select setval (\'group_table_group_id_seq\', 1, false)')
         pass
 
     def tearDown(self):
@@ -76,7 +77,7 @@ class Test_entry(unittest.TestCase):
         path_list = PathList(link_list)
         paths = path_list.createWholePath(src_port.dpid, dst_port.dpid)
         return paths
-
+    
     def testLabelFlowEntry(self):
         src_port = test_util.createPort(4, 3)
         dst_port = test_util.createPort(5, 3)
@@ -117,34 +118,24 @@ class Test_entry(unittest.TestCase):
         eq_([(20, 5, 1, 1, 4, 7, -1, 3), (20, 1, 2, 3, 1, 8, 7, 3)],
             label_flows)
 
+    #TODO Fix group flow tests.
     def testGroupFlowEntry(self):
-        """
         src_port = test_util.createPort(4, 3)
         dst_port = test_util.createPort(5, 3)
         paths = self._createPaths(src_port, dst_port)
-        p_path = paths[0][0]
-        b_path = paths[0][1]
-        group_flows = db.fetch_group_flows([p_path, b_path])
-
-    def send_group_mod(self, datapath):
-        ofp = datapath.ofproto
-        ofp_parser = datapath.ofproto_parser
-
-        port = 1
-        max_len = 2000
-        actions = [ofp_parser.OFPActionOutput(port, max_len)]
-
-        weight = 100
-        watch_port = 0
-        watch_group = 0
-        buckets = [ofp_parser.OFPBucket(weight, watch_port, watch_group,
-                                    actions)]
-
-        group_id = 1
-        req = ofp_parser.OFPGroupMod(datapath, ofp.OFPFC_ADD,
-                                 ofp.OFPGT_SELECT, group_id, buckets)
-        datapath.send_msg(req)
-        """
+        paths = self._createPaths(src_port, dst_port)
+        src_port_arp_table = (4, 3, '62:1e:dd:aa:41:9e', '10.0.0.2')
+        dst_port_arp_table = (5, 3, '96:06:4d:e3:70:50', '10.0.0.3')
+        path_ids = db.handle_paths(paths, src_port_arp_table,
+                                   dst_port_arp_table)
+        p_path = path_ids[0][0]
+        b_path = path_ids[1][0]
+        group_flows = db.fetch_group_flows((p_path, b_path))
+        expect_flows = {'group_flow':[{'group_id': 1, 'dpid': 4, 'group':(100, 1, 0),
+                        'label':[(1, 1, -1), (2, 3, -1)]}],
+                        'label_flow':[]}
+        eq_(expect_flows, group_flows) 
 
 if __name__ == '__main__':
     unittest.main()
+

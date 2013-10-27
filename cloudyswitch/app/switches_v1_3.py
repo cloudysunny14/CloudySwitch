@@ -89,7 +89,8 @@ class L2Switch(RyuApp):
                                          ofp.OFPP_ANY, ofp.OFPG_ANY,
                                          cookie, cookie_mask,
                                          match)
-        datapath.send_msg(req)
+        if datapath.id == 4:
+            datapath.send_msg(req)
 
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def flow_stats_reply_handler(self, ev):
@@ -155,8 +156,8 @@ class L2Switch(RyuApp):
                         port_data = self.ports.get_port(src)
                         if port_data.lldp_dropped() > self.LINK_LLDP_DROP:
                             deleted.append(link)
-                #for dp in self.dps.values():
-                    #self.send_flow_stats_request(dp)
+                for dp in self.dps.values():
+                    self.send_flow_stats_request(dp)
 
             for link in deleted:
                 self.links.link_down(link)

@@ -141,7 +141,7 @@ class SwitchEventHandler(app_manager.RyuApp):
         flow_mod = self.create_flow_mod(dp, 0, 0, match, insts)
         dp.send_msg(flow_mod)
 
-    def create_pop_label_flow(self, dp, label, out_port):
+    def create_pop_label_flow(self, dp, label):
         parser = dp.ofproto_parser
         eth_IP = ether.ETH_TYPE_IP
         eth_MPLS = ether.ETH_TYPE_MPLS
@@ -154,13 +154,86 @@ class SwitchEventHandler(app_manager.RyuApp):
         flow_mod = self.create_flow_mod(dp, 0, 0, match, insts)
         dp.send_msg(flow_mod)
 
-    def process_route(self, src_port, dst_port):
+    def createPushMPLSActions(self, dp, label):
+        parser = dp.ofproto_parser
+        eth_MPLS = ether.ETH_TYPE_MPLS
+        actions = [parser.OFPActionPushMpls(eth_MPLS),
+                   parser.OFPActionSetField(mpls_label=label[1]),
+                   parser.OFPActionOutput(label[0], 0)]
+        return actions
+
+    def createGroupedPushMPLS(self, dp, group_id, dst_port):
+        parser = dp.ofproto_parser
+        eth_IP = ether.ETH_TYPE_IP 
+        match = parser.OFPMatch(eth_type=eth_IP, eth_dst=dst_port[2])
+        actions =  [parser.OFPActionGroup(group_id=group_id)]
+        insts = [dp.ofproto_parser.OFPInstructionActions(
+                 dp.ofproto.OFPIT_APPLY_ACTIONS, actions)] 
+        flow_mod = self.create_flow_mod(dp, 0, 1, match, insts)
+        dp.send_msg(flow_mod)
+
+    def createGroupedSwapMPLS(self, dp, label, group_id):
+        parser = dp.ofproto_parser
+        eth_MPLS = ether.ETH_TYPE_MPLS
+        eth_IP = ether.ETH_TYPE_IP
+        match = parser.OFPMatch(eth_type=eth_MPLS,
+                                mpls_label=label[2])
+        actions = [parser.OFPActionPopMpls(eth_IP),
+                   parser.OFPActionGroup(group_id=group_id)]
+        insts = [parser.OFPInstructionActions(dp.ofproto.OFPIT_APPLY_ACTIONS,
+                                              actions)]
+        flow_mod = self.create_flow_mod(dp, 0, 0, match, insts)
+        dp.send_msg(flow_mod)
+
+    def send_group_flow(self, group, dst_port):
+        for group_entry in group:
+            dpid = group_entry['dpid']
+            target_switch = self.switches[dpid].switch
+            datapath = target_switch.dp
+            parser = datapath.ofproto_parser
+            ofp = datapath.ofproto
+            group_id = group_entry['group_id']
+            buckets = group_entry['buckets']
+            buckets_flow = []
+            for bucket in buckets:
+                watch = bucket['watch']
+                label = bucket['label']
+                #TODO Refactoring
+                actions = self.createPushMPLSActions(datapath, label)
+                ofp_bucket = parser.OFPBucket(
+                             0, watch[1], ofp.OFPG_ANY, actions)
+                buckets_flow.append(ofp_bucket)
+            mod = parser.OFPGroupMod(datapath, ofp.OFPFC_ADD,
+                                     ofp.OFPGT_FF, group_id, buckets_flow)
+            datapath.send_msg(mod)
+            for bucket in buckets:
+                watch = bucket['watch']
+                label = bucket['label']
+                if label[2] == -1:
+                    self.createGroupedPushMPLS(datapath, group_id, dst_port)
+                else:
+                    self.createGroupedSwapMPLS(datapath, label, group_id)
+
+    def process_route(self, src_port, dst_port, grouped_flow=False):
         path_list = PathList(self.link_list)
         paths = path_list.createWholePath(src_port[0], dst_port[0])
         path_ids = db.handle_paths(paths, src_port, dst_port)
-        #selected shortest path
-        label_flows = db.fetch_label_flows(path_ids[0][0])
-        last_label = 0
+        if grouped_flow:
+            try:
+                group_flow = db.fetch_group_flows([(path_ids[0][0], 100),
+                                               (path_ids[1][0], 50)])
+                LOG.debug(group_flow)
+                group = group_flow['group_flow']
+                self.send_group_flow(group, dst_port)
+                label_flows = group_flow['label_flow']
+                last_labels = group_flow['last_label']
+            except db.GroupAlreadyExistException:
+                return 
+        else:
+            #selected shortest path
+            label_flows, last_label = db.fetch_label_flows(path_ids[0][0])
+            last_labels = [last_label]
+    
         for label_flow in label_flows:
             target_switch = self.switches[label_flow[1]].switch
             if label_flow[6] == -1:
@@ -173,12 +246,11 @@ class SwitchEventHandler(app_manager.RyuApp):
                 self.create_swap_label_flow(target_switch.dp,
                                             label_flow[6], label_flow[5],
                                             label_flow[2])
-            last_label = label_flow[5]
         #Pop label entry
-        if last_label: 
-            target_switch = self.switches[dst_port[0]].switch
-            self.create_pop_label_flow(target_switch.dp, last_label,
-                                       dst_port[1])
+        for last_label in last_labels:
+            if last_label != -1: 
+                target_switch = self.switches[dst_port[0]].switch
+                self.create_pop_label_flow(target_switch.dp, last_label)
 
     def broadcast_to_end_nodes(self, msg):
         for switch in self.switches.values():
@@ -215,8 +287,8 @@ class SwitchEventHandler(app_manager.RyuApp):
             self.process_end_hw_addr_flows(src_port)
             self.process_end_hw_addr_flows(dst_port)
             if src_port[0] != dst_port[0]:
-                self.process_route(src_port, dst_port)
-                self.process_route(dst_port, src_port)
+                self.process_route(src_port, dst_port, True)
+                self.process_route(dst_port, src_port, True)
             if arppkt.opcode == arp.ARP_REPLY:
                 target_switch = self.switches[dst_port[0]].switch
                 self.arp_packet_out(target_switch.dp, dst_port[1], msg.data)

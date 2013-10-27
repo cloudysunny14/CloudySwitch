@@ -14,6 +14,7 @@
 # implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import logging
 import psyco_eventlet
 from ryu.exception import RyuException
 
@@ -21,6 +22,7 @@ psyco_eventlet.make_psycopg_green()
 
 import psycopg2
 
+LOG = logging.getLogger("db")
 #TODO Required to configure for db connecting.
 conn = psycopg2.connect("dbname=ryu user=postgres")
 #ISOLATION_LEVE_READ_COMMITTED is default setting.
@@ -29,7 +31,7 @@ conn = psycopg2.connect("dbname=ryu user=postgres")
 class ArpTableNotFoundException(RyuException):
     message = '%(msg)s'
 
-class RequiredReFetchException(RyuException):
+class GroupAlreadyExistException(RyuException):
     message = '%(msg)s'
 
 def fetch(query):
@@ -50,6 +52,7 @@ def clean_tables():
     curs.execute('DELETE FROM path_desc_table')
     curs.execute('DELETE FROM label_table')
     curs.execute('DELETE FROM path_table')
+    curs.execute('DELETE FROM group_table')
     commit()
 
 def handle_arp_packet(arppkt, dpid, port_no):
@@ -95,7 +98,7 @@ def register_path(path, src_port, dst_port):
         path_seq += 1
     return path_id[0]
 
-def handle_paths(path_list, src_port, dst_port):
+def handle_paths(path_list, src_port, dst_port, is_detect_exists=False):
     #Confirm paths that already exists
     path_ids = fetch_path_id(src_port, dst_port)
     if not len(path_ids):
@@ -142,17 +145,81 @@ def fetch_label_flows(path_id):
                        path_id = %d ORDER BY path_seq' %
                        (path_id))
     prev_label = -1
+    registered_label = []
     for port_set in create_port_set(path_desc):
         src_port = port_set[0]
         dst_port = port_set[1]
         label_entry = register_label(path_id, src_port,
                                      dst_port, prev_label, path[0][3])
+        registered_label.append(label_entry)
         prev_label = label_entry[5]
     commit()
-    label_flows = []
-    label_flow = fetch('SELECT * FROM label_table WHERE\
+    label_flows = fetch('SELECT * FROM label_table WHERE\
                         path_id = %d' % (path_id))
-    for label in label_flow:
-        label_flows.append(label)
-    return label_flows
+    if not len(label_flows):
+        #Already registered labels, but first entry required.
+        label_flows.append(registered_label[0])
+        prev_label = -1
+    return label_flows, prev_label
+
+def fetch_group_flows(paths):
+    last_labels = []
+    weights = []
+    path_ids = []
+    for path_id, weight in paths:
+        #TODO In this case whold not Fetch label.
+        ignore, last_label = fetch_label_flows(path_id)
+        last_labels.append(last_label)
+        weights.append(weight)
+        path_ids.append(path_id)
+    try:
+        path_ids = ','.join(str(i) for i in path_ids)
+    except TypeError:
+        path_ids = str(path_ids[0])
+    grouped_dpid = fetch('SELECT label_table.src_dpid FROM label_table, (\
+                          SELECT count(*) as count, src_dpid FROM \
+                          label_table WHERE path_id IN (%s) GROUP BY src_dpid) \
+                          AS counts WHERE label_table.src_dpid = counts.src_dpid AND \
+                          counts.count > 1 GROUP BY label_table.src_dpid' %
+                          (path_ids,))
+    grouped_dpid = tuple(int(i[0]) for i in grouped_dpid)
+    group_flow = {}
+    flows = []
+    for dpid in grouped_dpid:
+        group = {}
+        labels = fetch('SELECT * FROM label_table WHERE path_id IN (%s) AND \
+                        src_dpid = %d ORDER BY path_id' % (path_ids, dpid,))
+        group_is_exist = fetch('SELECT COUNT(*) FROM group_table WHERE\
+                                including_path = \'%s\'' % (path_ids,))
+        if group_is_exist[0][0]:
+            raise GroupAlreadyExistException(
+              msg='Group entry is alread exsit.')
+        #TODO watch port is path_id[0] in default.
+        #TODO Alter table group_table
+        execute('INSERT INTO group_table (dpid, weight, watch_port, watch_group,\
+                 including_path) VALUES (%d, %d, %d, %d, \'%s\')' %
+                 (dpid, weight, labels[0][2], 0, path_ids,))
+        group_id = fetch('SELECT currval(\'group_table_group_id_seq\')')
+        group['group_id'] = group_id[0][0]
+        group['dpid'] = dpid
+        buckets = []
+        index = 0
+        for label in labels:
+            watch = {}
+            watch['watch'] = (weights[index], label[2], 0)
+            watch['label'] = (label[2], label[5], label[6])
+            buckets.append(watch)
+            index += 1
+        group['buckets'] = buckets
+        flows.append(group)
+    try:
+        grouped_dpid = ','.join(grouped_dpid)
+    except TypeError:
+        grouped_dpid = str(grouped_dpid[0])
+    single_labels = fetch('SELECT * FROM label_table WHERE path_id IN (%s) AND \
+                           src_dpid NOT IN (%s)' % (path_ids, grouped_dpid,))
+    group_flow['group_flow'] = flows
+    group_flow['label_flow'] = single_labels
+    group_flow['last_label'] = last_labels 
+    return group_flow
 
