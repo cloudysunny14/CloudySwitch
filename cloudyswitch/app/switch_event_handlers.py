@@ -186,33 +186,26 @@ class SwitchEventHandler(app_manager.RyuApp):
         dp.send_msg(flow_mod)
 
     def send_group_flow(self, group, dst_port):
-        for group_entry in group:
-            dpid = group_entry['dpid']
-            target_switch = self.switches[dpid].switch
-            datapath = target_switch.dp
-            parser = datapath.ofproto_parser
-            ofp = datapath.ofproto
-            group_id = group_entry['group_id']
-            buckets = group_entry['buckets']
-            buckets_flow = []
-            for bucket in buckets:
-                watch = bucket['watch']
-                label = bucket['label']
-                #TODO Refactoring
-                actions = self.createPushMPLSActions(datapath, label)
-                ofp_bucket = parser.OFPBucket(
-                             0, watch[1], ofp.OFPG_ANY, actions)
-                buckets_flow.append(ofp_bucket)
-            mod = parser.OFPGroupMod(datapath, ofp.OFPFC_ADD,
-                                     ofp.OFPGT_FF, group_id, buckets_flow)
-            datapath.send_msg(mod)
-            for bucket in buckets:
-                watch = bucket['watch']
-                label = bucket['label']
-                if label[2] == -1:
-                    self.createGroupedPushMPLS(datapath, group_id, dst_port)
-                else:
-                    self.createGroupedSwapMPLS(datapath, label, group_id)
+        dpid = group['dpid']
+        target_switch = self.switches[dpid].switch
+        datapath = target_switch.dp
+        parser = datapath.ofproto_parser
+        ofp = datapath.ofproto
+        group_id = group['group_id']
+        buckets = group['buckets']
+        buckets_flow = []
+        for bucket in buckets:
+            watch = bucket['watch']
+            label = bucket['label']
+            #TODO Refactoring
+            actions = self.createPushMPLSActions(datapath, label)
+            ofp_bucket = parser.OFPBucket(
+                          10, watch, ofp.OFPG_ANY, actions)
+            buckets_flow.append(ofp_bucket)
+        mod = parser.OFPGroupMod(datapath, ofp.OFPFC_ADD,
+                                  ofp.OFPGT_SELECT, group_id, buckets_flow)
+        datapath.send_msg(mod)
+        self.createGroupedPushMPLS(datapath, group_id, dst_port) 
 
     def process_route(self, src_port, dst_port, grouped_flow=False):
         path_list = PathList(self.link_list)
@@ -220,8 +213,11 @@ class SwitchEventHandler(app_manager.RyuApp):
         path_ids = db.handle_paths(paths, src_port, dst_port)
         if grouped_flow:
             try:
-                group_flow = db.fetch_group_flows([(path_ids[0][0], 100),
-                                               (path_ids[1][0], 50)])
+                paths = []
+                for path in path_ids:
+                    paths.append((path[0], 0))
+                LOG.debug(paths)
+                group_flow = db.fetch_group_flows(paths)
                 LOG.debug(group_flow)
                 group = group_flow['group_flow']
                 self.send_group_flow(group, dst_port)
@@ -233,7 +229,6 @@ class SwitchEventHandler(app_manager.RyuApp):
             #selected shortest path
             label_flows, last_label = db.fetch_label_flows(path_ids[0][0])
             last_labels = [last_label]
-    
         for label_flow in label_flows:
             target_switch = self.switches[label_flow[1]].switch
             if label_flow[6] == -1:

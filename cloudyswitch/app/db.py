@@ -176,50 +176,43 @@ def fetch_group_flows(paths):
         path_ids = ','.join(str(i) for i in path_ids)
     except TypeError:
         path_ids = str(path_ids[0])
-    grouped_dpid = fetch('SELECT label_table.src_dpid FROM label_table, (\
-                          SELECT count(*) as count, src_dpid FROM \
-                          label_table WHERE path_id IN (%s) GROUP BY src_dpid) \
-                          AS counts WHERE label_table.src_dpid = counts.src_dpid AND \
-                          counts.count > 1 GROUP BY label_table.src_dpid' %
-                          (path_ids,))
-    grouped_dpid = tuple(int(i[0]) for i in grouped_dpid)
-    group_flow = {}
-    flows = []
-    for dpid in grouped_dpid:
-        group = {}
-        labels = fetch('SELECT * FROM label_table WHERE path_id IN (%s) AND \
-                        src_dpid = %d ORDER BY path_id' % (path_ids, dpid,))
-        group_is_exist = fetch('SELECT COUNT(*) FROM group_table WHERE\
-                                including_path = \'%s\'' % (path_ids,))
-        if group_is_exist[0][0]:
+    grouping_label  = fetch('SELECT * FROM label_table WHERE\
+                             prev_label = -1 and path_id IN (%s)' %
+                             (path_ids,))
+    group_is_exist = fetch('SELECT COUNT(*) FROM group_table WHERE\
+                            including_path = \'%s\'' % (path_ids))
+    if group_is_exist[0][0] == 1:
             raise GroupAlreadyExistException(
               msg='Group entry is alread exsit.')
-        #TODO watch port is path_id[0] in default.
-        #TODO Alter table group_table
-        execute('INSERT INTO group_table (dpid, weight, watch_port, watch_group,\
-                 including_path) VALUES (%d, %d, %d, %d, \'%s\')' %
-                 (dpid, weight, labels[0][2], 0, path_ids,))
-        group_id = fetch('SELECT currval(\'group_table_group_id_seq\')')
-        group['group_id'] = group_id[0][0]
-        group['dpid'] = dpid
-        buckets = []
-        index = 0
-        for label in labels:
-            watch = {}
-            watch['watch'] = (weights[index], label[2], 0)
-            watch['label'] = (label[2], label[5], label[6])
-            buckets.append(watch)
-            index += 1
-        group['buckets'] = buckets
-        flows.append(group)
-    try:
-        grouped_dpid = ','.join(grouped_dpid)
-    except TypeError:
-        grouped_dpid = str(grouped_dpid[0])
-    single_labels = fetch('SELECT * FROM label_table WHERE path_id IN (%s) AND \
-                           src_dpid NOT IN (%s)' % (path_ids, grouped_dpid,))
-    group_flow['group_flow'] = flows
-    group_flow['label_flow'] = single_labels
-    group_flow['last_label'] = last_labels 
-    return group_flow
+    #All labels are owns same dpid.
+    dpid = grouping_label[0][1]
+    execute('INSERT INTO group_table (dpid, including_path) VALUES \
+             (%d, \'%s\')' %
+             (dpid, path_ids,))
 
+    group_id = fetch('SELECT currval(\'group_table_group_id_seq\')')
+    group_flow = {}
+    group = {}
+    group['group_id'] = group_id[0][0]
+    group['dpid'] = dpid
+    buckets = []
+    grouped_label = []
+    for label in grouping_label:
+        watch = {}
+        watch['watch'] = (label[2])
+        watch['label'] = (label[2], label[5], label[6])
+        grouped_label.append(label[5])
+        buckets.append(watch)
+        group['buckets'] = buckets
+    try:
+        grouped_label = ','.join(str(i) for i in grouped_label)
+    except TypeError:
+        grouped_label = str(path_ids[0])
+    single_labels = fetch('SELECT * FROM label_table WHERE path_id IN (%s) AND \
+                           label NOT IN (%s)' % (path_ids, grouped_label,))
+    LOG.debug('SELECT * FROM label_table WHERE path_id IN (%s) AND \
+                           label NOT IN (%s)' % (path_ids, grouped_label,))
+    group_flow['group_flow'] = group
+    group_flow['label_flow'] = single_labels
+    group_flow['last_label'] = last_labels
+    return group_flow
