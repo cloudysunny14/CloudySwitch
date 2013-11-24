@@ -79,36 +79,20 @@ class L2Switch(RyuApp):
             hub.joinall(self.threads)
 
     def send_flow_stats_request(self, datapath):
-        ofp = datapath.ofproto
         ofp_parser = datapath.ofproto_parser
-
-        cookie = cookie_mask = 0
-        match = ofp_parser.OFPMatch()
-        req = ofp_parser.OFPFlowStatsRequest(datapath, 0,
-                                         ofp.OFPTT_ALL,
-                                         ofp.OFPP_ANY, ofp.OFPG_ANY,
-                                         cookie, cookie_mask,
-                                         match)
-        if datapath.id == 4:
+        req = ofp_parser.OFPGroupDescStatsRequest(datapath, 0)
+        if datapath.id == 3:
             datapath.send_msg(req)
 
-    @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
+    @set_ev_cls(ofp_event.EventOFPGroupDescStatsReply, MAIN_DISPATCHER)
     def flow_stats_reply_handler(self, ev):
-        flows = []
+        descs = []
         for stat in ev.msg.body:
-            flows.append('table_id=%s '
-                     'duration_sec=%d duration_nsec=%d '
-                     'priority=%d '
-                     'idle_timeout=%d hard_timeout=%d flags=0x%04x '
-                     'cookie=%d packet_count=%d byte_count=%d '
-                     'match=%s instructions=%s' %
-                     (stat.table_id,
-                      stat.duration_sec, stat.duration_nsec,
-                      stat.priority,
-                      stat.idle_timeout, stat.hard_timeout, stat.flags,
-                      stat.cookie, stat.packet_count, stat.byte_count,
-                      stat.match, stat.instructions))
-        LOG.debug('FlowStats: %s', flows)
+            descs.append('length=%d type=%d group_id=%d '
+                     'buckets=%s' %
+                     (stat.length, stat.type, stat.group_id,
+                      stat.buckets))
+        LOG.debug('GroupDescStats: %s', descs)
 
     def lldp_loop(self):
         while self.is_active:

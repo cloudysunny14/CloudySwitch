@@ -115,22 +115,22 @@ def register_label(path_id, src_port, dst_port, prev_label, target_dst_dpid):
                               target_dst_dpid = %d AND prev_label = %d' % 
                               (src_port[2], src_port[3], dst_port[2], dst_port[3],
                                target_dst_dpid, prev_label))
-    if not len(registered_label):
-        execute('INSERT INTO label_table (path_id, src_dpid, src_port_no, \
+    #if not len(registered_label):
+    execute('INSERT INTO label_table (path_id, src_dpid, src_port_no, \
                  dst_dpid, dst_port_no, prev_label, target_dst_dpid)\
                  VALUES (%d, %d, %d, %d, %d, %d, %d)' %
                  (path_id, src_port[2], src_port[3],
                   dst_port[2], dst_port[3], prev_label, target_dst_dpid))
-        label = fetch('SELECT currval(\'label_table_label_seq\')')
-        registered_label = (path_id, src_port[2], src_port[3], dst_port[2],
+    label = fetch('SELECT currval(\'label_table_label_seq\')')
+    registered_label = (path_id, src_port[2], src_port[3], dst_port[2],
                             dst_port[3], label[0][0], prev_label, False, target_dst_dpid)
-    else:
-        registered_label = registered_label[0]
+    #else:
+    #    registered_label = registered_label[0]
         #common path found
-        if registered_label[6] != -1 and prev_label != -1:
-            execute('UPDATE label_table SET label = %d WHERE label = %d AND\
-                     path_id = %d' %
-                     (registered_label[6], prev_label, path_id))
+    #    if registered_label[6] != -1 and prev_label != -1:
+    #        execute('UPDATE label_table SET label = %d WHERE label = %d AND\
+    #                 path_id = %d' %
+    #                 (registered_label[6], prev_label, path_id))
     return registered_label
         
 def create_port_set(path_ports, num = 2):
@@ -203,16 +203,55 @@ def fetch_group_flows(paths):
         watch['label'] = (label[2], label[5], label[6])
         grouped_label.append(label[5])
         buckets.append(watch)
-        group['buckets'] = buckets
+    group['buckets'] = buckets
     try:
         grouped_label = ','.join(str(i) for i in grouped_label)
     except TypeError:
         grouped_label = str(path_ids[0])
     single_labels = fetch('SELECT * FROM label_table WHERE path_id IN (%s) AND \
                            label NOT IN (%s)' % (path_ids, grouped_label,))
-    LOG.debug('SELECT * FROM label_table WHERE path_id IN (%s) AND \
-                           label NOT IN (%s)' % (path_ids, grouped_label,))
     group_flow['group_flow'] = group
     group_flow['label_flow'] = single_labels
     group_flow['last_label'] = last_labels
     return group_flow
+
+def pathsSrcFromPort(dpid, port_no):
+    unavailable_paths = fetch('SELECT path_id FROM path_desc_table WHERE dpid = %s AND \
+                               port_no = %s' % (dpid, port_no))
+    group_id_dict = {}
+    for path in unavailable_paths:
+        group_ids = fetch('SELECT group_id, dpid, including_path FROM group_table WHERE \
+                            including_path LIKE \'%%%s%%\'' % (path[0],))
+        for group in group_ids:
+            group_id_dict[group[0]] = group[2]
+        execute('DELETE FROM label_table WHERE path_id = %s' % (path[0],))
+    group_flows = []
+    for group_id, paths in group_id_dict.items():
+        path_list = paths.split(',')
+        new_path_list = []
+        for path in path_list:
+            if path not in unavailable_paths[0]:
+                new_path_list.append(path)
+        try:
+            new_path_ids = ','.join(str(i) for i in new_path_list)
+        except TypeError:
+            new_path_ids = str(new_path_list[0])
+        execute('UPDATE group_table SET including_path = \'%s\' WHERE group_id = %d'%
+                (new_path_ids, group_id))
+        grouping_label  = fetch('SELECT * FROM label_table WHERE\
+                                 prev_label = -1 and path_id IN (%s)' %
+                                 (new_path_ids,))
+        buckets = []
+        group = {}
+        for label in grouping_label:
+            watch = {}
+            watch['watch'] = (label[2])
+            watch['label'] = (label[2], label[5], label[6])
+            buckets.append(watch)
+            dpid = label[1]
+        group['group_id'] = group_id
+        group['dpid'] = dpid
+        group['buckets'] = buckets
+        group_flows.append(group)
+    commit()
+    return group_flows

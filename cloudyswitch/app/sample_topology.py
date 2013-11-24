@@ -12,7 +12,7 @@ LOG = logging.getLogger("switches_v1_3")
 class MyTopo( Topo ):
     "Simple topology example."
 
-    def full_mesh_connect(self, switches, bw=1):
+    def full_mesh_connect(self, switches, bw=10):
         connected_switch = []
         for switch in switches:
             connected_switch.append(switch)
@@ -31,12 +31,14 @@ class MyTopo( Topo ):
         switch02 = self.addSwitch('s2')
         switch03 = self.addSwitch('s3')
         switch04 = self.addSwitch('s4')
+        switch05 = self.addSwitch('s5')
+        switch06 = self.addSwitch('s6')
+        self.full_mesh_connect([switch01, switch02, switch03,
+                                switch04, switch05], bw = 10)
         # Add links
-        self.addLink(host01, switch01, bw=10)
-        self.addLink(host01, switch02, bw=10)
-        self.addLink(switch01, switch03, bw=0.1)
-        self.addLink(switch02, switch04, bw=0.1)
-        self.addLink(host02, switch03, bw=10)
-        self.addLink(host02, switch04, bw=10)
+        self.addLink(host01, switch01, bw=50)
+        self.addLink(host01, switch02, bw=50)
+        self.addLink(host02, switch03, bw=50)
+        self.addLink(host02, switch04, bw=50)
 
 topos = { 'mytopo': ( lambda: MyTopo() )}
