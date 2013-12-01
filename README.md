@@ -49,11 +49,12 @@ Getting Started
 
 ## Features
 * Packet forwading using MPLS on OpenFlow 1.3
+
 The code is a work in progress, and this is an early release.
 
 ##Roadmap
 * REST API
-* GUI(like flood light)
+* GUI(Like Floodlight)
 
 ## Get Involved
 It’s all Apache 2.0 licensed.
