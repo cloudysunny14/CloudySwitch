@@ -21,7 +21,9 @@ Please refer to [installation page](http://initd.org/psycopg/install/) for insta
     git clone https://github.com/cloudysunny14/CloudySwitch.git
 
 ## Running cloudyswitch
-
+    $ psql -d postgres -U postgres
+    postgres=# create database ryu;
+    
     $ cd CloudySwitch/cloudyswitch/demo/
     $ sudo ./cloudyrun_sample.sh
 
