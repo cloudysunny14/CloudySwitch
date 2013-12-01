@@ -21,8 +21,9 @@ Getting Started
 
 ## Running cloudyswitch
 
-    cd CloudySwitch/cloudyswitch/demo/
-    sudo ./cloudyrun_sample.sh
+    $ cd CloudySwitch/cloudyswitch/demo/
+    $ sudo ./cloudyrun_sample.sh
+
 
     mininet> h1 ping h2 -c 3
     EVENT ofp_event->switches EventOFPPacketIn
