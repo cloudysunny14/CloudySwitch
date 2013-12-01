@@ -11,10 +11,8 @@ Getting Started
   Please refer to [Ryu version of OpenFlow Tutorial]()
 * CloudySwitch setup
   You will need the following installed in your environment that runs CloudySwitch
-  * postgresql 
-    Please refer to [installation page]() for install and settings postgresql
-  * psycopg2
-    Please refer to [installation page](http://initd.org/psycopg/install/) for install psycopg2
+  * postgresql      Please refer to [installation page]() for install and settings postgresql
+  * psycopg2      Please refer to [installation page](http://initd.org/psycopg/install/) for install psycopg2
 
 ## Download
     git clone https://github.com/cloudysunny14/CloudySwitch.git
