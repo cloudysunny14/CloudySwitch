@@ -7,12 +7,11 @@ Getting Started
 ============
 
 ## Prerequisites and settings
-* Ryu and Mininet setup
-  Please refer to [Ryu version of OpenFlow Tutorial]()
-* CloudySwitch setup
-  You will need the following installed in your environment that runs CloudySwitch
-  * postgresql      Please refer to [installation page]() for install and settings postgresql
-  * psycopg2      Please refer to [installation page](http://initd.org/psycopg/install/) for install psycopg2
+* Ryu and Mininet setup  Please refer to [Ryu version of OpenFlow Tutorial](https://github.com/osrg/ryu/wiki/OpenFlow_Tutorial)
+
+* CloudySwitch setup  You will need the following installed in your environment that runs CloudySwitch
+  * postgresql  Please refer to [installation page](http://www.postgresql.org/) for install and settings postgresql
+  * psycopg2  Please refer to [installation page](http://initd.org/psycopg/install/) for install psycopg2
 
 ## Download
     git clone https://github.com/cloudysunny14/CloudySwitch.git
@@ -55,6 +54,5 @@ The code is a work in progress, and this is an early release.
 * GUI(Like Floodlight)
 
 ## Get Involved
-It’s all Apache 2.0 licensed.
-Check out our Git repository and feel free to post patches on the issue tracker.
+It’s all Apache 2.0 licensed.  Check out our Git repository and feel free to post patches on the issue tracker.
 
