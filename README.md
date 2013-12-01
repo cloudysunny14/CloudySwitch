@@ -14,10 +14,10 @@ Getting Started
   * postgresql 
     Please refer to [installation page]() for install and settings postgresql
   * psycopg2
-    Please refer to [installation page](http://initd.org/psycopg/install/) of psycopg2
+    Please refer to [installation page](http://initd.org/psycopg/install/) for install psycopg2
 
 ## Download
-'git clone https://github.com/cloudysunny14/CloudySwitch.git'
+    git clone https://github.com/cloudysunny14/CloudySwitch.git
 
 ## Running cloudyswitch
 
@@ -48,7 +48,7 @@ Getting Started
 
 ## Features
 * Packet forwading using MPLS on OpenFlow 1.3
-  The code is a work in progress, and this is an early release.
+The code is a work in progress, and this is an early release.
 
 ##Roadmap
 * REST API
