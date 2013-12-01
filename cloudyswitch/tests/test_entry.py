@@ -86,13 +86,13 @@ class Test_entry(unittest.TestCase):
         dst_port_arp_table = (5, 3, '96:06:4d:e3:70:50', '10.0.0.3')
         path_ids = db.handle_paths(paths, src_port_arp_table,
                                    dst_port_arp_table)
-        label_flows = db.fetch_label_flows(path_ids[0][0])
+        label_flows, last_label = db.fetch_label_flows(path_ids[0][0])
         eq_([(1, 4, 1, 1, 3, 1, -1, 5), (1, 1, 4, 5, 1, 2, 1, 5)],
             label_flows)
         paths = self._createPaths(dst_port, src_port)
         path_ids = db.handle_paths(paths, dst_port_arp_table,
                                    src_port_arp_table)
-        label_flows = db.fetch_label_flows(path_ids[0][0])
+        label_flows, last_label = db.fetch_label_flows(path_ids[0][0])
         eq_([(7, 5, 2, 2, 4, 3, -1, 4), (7, 2, 3, 4, 2, 4, 3, 4)],
             label_flows)
 
@@ -103,7 +103,7 @@ class Test_entry(unittest.TestCase):
         dst_port_arp_table = (3, 3, '96:06:4d:e3:70:53', '10.0.0.4')
         path_ids = db.handle_paths(paths, src_port_arp_table,
                                    dst_port_arp_table)
-        label_flows = db.fetch_label_flows(path_ids[0][0])
+        label_flows, last_label = db.fetch_label_flows(path_ids[0][0])
         eq_([(13, 4, 1, 1, 3, 5, -1, 3), (13, 1, 2, 3, 1, 6, 5, 3)],
             label_flows)
 
@@ -114,15 +114,13 @@ class Test_entry(unittest.TestCase):
         dst_port_arp_table = (3, 3, '96:06:4d:e3:70:53', '10.0.0.4')
         path_ids = db.handle_paths(paths, src_port_arp_table,
                                    dst_port_arp_table)
-        label_flows = db.fetch_label_flows(path_ids[1][0])
+        label_flows, label_label = db.fetch_label_flows(path_ids[1][0])
         eq_([(20, 5, 1, 1, 4, 7, -1, 3), (20, 1, 2, 3, 1, 8, 7, 3)],
             label_flows)
 
-    #TODO Fix group flow tests.
     def testGroupFlowEntry(self):
         src_port = test_util.createPort(4, 3)
         dst_port = test_util.createPort(5, 3)
-        paths = self._createPaths(src_port, dst_port)
         paths = self._createPaths(src_port, dst_port)
         src_port_arp_table = (4, 3, '62:1e:dd:aa:41:9e', '10.0.0.2')
         dst_port_arp_table = (5, 3, '96:06:4d:e3:70:50', '10.0.0.3')
@@ -131,10 +129,29 @@ class Test_entry(unittest.TestCase):
         p_path = path_ids[0][0]
         b_path = path_ids[1][0]
         group_flows = db.fetch_group_flows((p_path, b_path))
-        expect_flows = {'group_flow':[{'group_id': 1, 'dpid': 4, 'group':(100, 1, 0),
-                        'label':[(1, 1, -1), (2, 3, -1)]}],
-                        'label_flow':[]}
-        eq_(expect_flows, group_flows) 
+        expect_flows = {'last_label': [2L, 4L], 
+                        'group_flow': {'buckets': [{'watch': 1, 'label': (1, 1, -1)},
+                        {'watch': 2, 'label': (2, 3, -1)}], 'group_id': 1L, 'dpid': 4},
+                        'label_flow': [(1, 1, 4, 5, 1, 2, 1, 5),
+                          (2, 2, 4, 5, 2, 4, 3, 5)]}
+        eq_(group_flows, expect_flows)
+
+    def testDetectRequireModifyPaths(self):
+        src_port = test_util.createPort(4, 3)
+        dst_port = test_util.createPort(5, 3)
+        paths = self._createPaths(src_port, dst_port)
+        src_port_arp_table = (4, 3, '62:1e:dd:aa:41:9e', '10.0.0.2')
+        dst_port_arp_table = (5, 3, '96:06:4d:e3:70:50', '10.0.0.3')
+        #Assume that already created paths
+        path_ids = db.handle_paths(paths, src_port_arp_table,
+                                   dst_port_arp_table)
+        p_path = path_ids[0][0]
+        b_path = path_ids[1][0]
+        db.fetch_group_flows((p_path, b_path))
+        flow_mod = db.detect_require_modify_paths(1, 4)
+        expect_flow = [{'buckets': [{'watch': 2, 'label': (2, 3, -1)}],
+                         'group_id': 1, 'dpid': 4}]
+        eq_(flow_mod, expect_flow)
 
 if __name__ == '__main__':
     unittest.main()

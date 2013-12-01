@@ -46,8 +46,41 @@ def execute(cmd):
 def commit():
     conn.commit()
 
+def create_table(table_name, curs):
+    if table_name == 'arp_table':
+        curs.execute('CREATE TABLE arp_table (dpid integer, \
+                     port_no integer, mac_addr varchar, ip_addr varchar)')
+    elif table_name == 'path_table':
+        curs.execute('CREATE TABLE path_table (path_id serial primary key, \
+                      src_dpid integer, src_port_no integer, dst_dpid integer, \
+                      dst_port_no integer, cost smallint)')
+    elif table_name == 'path_desc_table':
+        curs.execute('CREATE TABLE path_desc_table (path_id int REFERENCES \
+                      path_table(path_id), path_seq integer, dpid integer, \
+                      port_no integer)')
+    elif table_name == 'label_table':
+        curs.execute('CREATE TABLE label_table (path_id integer REFERENCES \
+                      path_table(path_id), src_dpid integer, src_port_no integer, \
+                      dst_dpid integer, dst_port_no integer, label serial, \
+                      prev_label integer, target_dst_dpid integer)')
+    elif table_name == 'group_table':
+        curs.execute('CREATE TABLE group_table (group_id serial primary key, \
+                      dpid integer, including_path varchar)')
+
+def exist_table(table_name):
+    curs = conn.cursor()
+    curs.execute('SELECT * FROM information_schema.tables WHERE table_name=%s',
+                 (table_name,))
+    if not bool(curs.rowcount):
+        create_table(table_name, curs)
+
 def clean_tables():
     curs = conn.cursor()
+    exist_table('arp_table')
+    exist_table('path_table')
+    exist_table('path_desc_table')
+    exist_table('label_table')
+    exist_table('group_table')
     curs.execute('DELETE FROM arp_table')
     curs.execute('DELETE FROM path_desc_table')
     curs.execute('DELETE FROM label_table')
@@ -123,7 +156,7 @@ def register_label(path_id, src_port, dst_port, prev_label, target_dst_dpid):
                   dst_port[2], dst_port[3], prev_label, target_dst_dpid))
     label = fetch('SELECT currval(\'label_table_label_seq\')')
     registered_label = (path_id, src_port[2], src_port[3], dst_port[2],
-                            dst_port[3], label[0][0], prev_label, False, target_dst_dpid)
+                            dst_port[3], label[0][0], prev_label, target_dst_dpid)
     #else:
     #    registered_label = registered_label[0]
         #common path found
@@ -164,13 +197,10 @@ def fetch_label_flows(path_id):
 
 def fetch_group_flows(paths):
     last_labels = []
-    weights = []
     path_ids = []
-    for path_id, weight in paths:
-        #TODO In this case whold not Fetch label.
+    for path_id in paths:
         ignore, last_label = fetch_label_flows(path_id)
         last_labels.append(last_label)
-        weights.append(weight)
         path_ids.append(path_id)
     try:
         path_ids = ','.join(str(i) for i in path_ids)
@@ -215,7 +245,7 @@ def fetch_group_flows(paths):
     group_flow['last_label'] = last_labels
     return group_flow
 
-def pathsSrcFromPort(dpid, port_no):
+def detect_require_modify_paths(dpid, port_no):
     unavailable_paths = fetch('SELECT path_id FROM path_desc_table WHERE dpid = %s AND \
                                port_no = %s' % (dpid, port_no))
     group_id_dict = {}
