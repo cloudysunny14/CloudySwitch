@@ -7,7 +7,8 @@ Getting Started
 ============
 
 ## Prerequisites and settings
-* Ryu and Mininet setup  Please refer to [Ryu version of OpenFlow Tutorial](https://github.com/osrg/ryu/wiki/OpenFlow_Tutorial)
+* Ryu and Mininet setup  
+Please refer to [Ryu version of OpenFlow Tutorial](https://github.com/osrg/ryu/wiki/OpenFlow_Tutorial)
 
 * CloudySwitch setup  
 You will need the following installed in your environment that runs CloudySwitch
