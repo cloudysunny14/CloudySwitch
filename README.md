@@ -48,7 +48,7 @@ Please refer to [installation page](http://initd.org/psycopg/install/) for insta
     3 packets transmitted, 3 received, 0% packet loss, time 1998ms
     rtt min/avg/max/mdev = 0.503/0.563/0.619/0.051 ms
 
-※There is known issue only the first ping is not reach.
+※There is the known issue only the first ping is not reach.
 
 ## Features
 * Packet forwading using MPLS on OpenFlow 1.3
@@ -57,7 +57,7 @@ The code is a work in progress, and this is an early release.
 
 ##Roadmap
 * REST API
-* GUI(Like Floodlight)
+* GUI
 
 ## Get Involved
 It’s all Apache 2.0 licensed.  
