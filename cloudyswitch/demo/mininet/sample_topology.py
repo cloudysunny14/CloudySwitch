@@ -18,7 +18,7 @@ class MyTopo( Topo ):
             connected_switch.append(switch)
             for connectSwitch in switches:
                 if connectSwitch not in connected_switch:
-                    self.addLink(switch, connectSwitch, bw=bw)
+                    self.addLink(switch, connectSwitch, bw=bw, user_htb=True)
     
     def __init__( self ):
         "Create custom topo."

@@ -1,8 +1,9 @@
 MN_PRE_FILE=/tmp/test-mn/mn-pre
 MN_POST_FILE=/tmp/test-mn/mn-post
+MN_FILE_DIR=/tmp/test-mn
 # set default environment
 set_env() {
-    RYU_APP=../app/switches_v1_3.py,../app/switch_event_handlers.py
+    RYU_APP=../../app/switches_v1_3.py,../../app/switch_event_handlers.py
 }
 # making mininet-test-pre-file
 mn_pre() {
@@ -42,7 +43,8 @@ run_ryu() {
 # starting mininet and test-script
 run_mn() {
     echo "Info: mininet starting..."
-    sudo mn --pre $MN_PRE_FILE --post $MN_POST_FILE --switch user --controller remote --custom sample_topology.py --topo mytopo --link tc
+    sudo mn --pre $MN_PRE_FILE --post $MN_POST_FILE --switch user --controller remote --custom sample_topology.py --topo mytopo
+
 }
 
 # cleaning after mininet
@@ -56,7 +58,7 @@ wait_ryu() {
     kill -2 $PID_RYU
     wait $PID_RYU
 }
-
+[ -d $MN_FILE_DIR ] || mkdir -p $MN_FILE_DIR
 # test-main
 test_mn() {
     mn_pre
@@ -79,4 +81,3 @@ clean_mn
 echo "¥n---------- test finish ----------"
 
 exit 0
-

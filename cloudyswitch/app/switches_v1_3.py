@@ -141,7 +141,7 @@ class L2Switch(RyuApp):
                         if port_data.lldp_dropped() > self.LINK_LLDP_DROP:
                             deleted.append(link)
                 #for dp in self.dps.values():
-                    #self.send_flow_stats_request(dp)
+                    #self.send_queue_get_config_request(dp)
 
             for link in deleted:
                 self.links.link_down(link)
