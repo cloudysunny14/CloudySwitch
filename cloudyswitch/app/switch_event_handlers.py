@@ -44,7 +44,7 @@ class SwitchState(object):
 
 class SwitchEventHandler(app_manager.RyuApp):
 
-    ARP_PACKET_LEN = ethernet._MIN_LEN + arp.arp._MIN_LEN 
+    ARP_PACKET_LEN = ethernet._MIN_LEN + arp.arp._MIN_LEN
 
     def __init__(self, *args, **kwargs):
         super(SwitchEventHandler, self).__init__(*args, **kwargs)
@@ -70,14 +70,13 @@ class SwitchEventHandler(app_manager.RyuApp):
         flow_mod = self.create_flow_mod(datapath, 0, 0,
                                         match, instructions)
         datapath.send_msg(flow_mod)
-         
+
     @handler.set_ev_cls(event.EventSwitchEnter)
     def switch_enter_handler(self, event):
         switch = event.switch
         datapath = switch.dp
         self.switches[datapath.id] = SwitchState(switch)
         self.send_default_flow(datapath)
-        
 
     @set_ev_cls(ofp_event.EventOFPErrorMsg,
                     [HANDSHAKE_DISPATCHER, CONFIG_DISPATCHER, MAIN_DISPATCHER])
@@ -92,7 +91,7 @@ class SwitchEventHandler(app_manager.RyuApp):
         self.link_list.append(link.link)
         port_src = link.link.src
         port_dst = link.link.dst
-        switch_src = self.switches[port_src.dpid] 
+        switch_src = self.switches[port_src.dpid]
         switch_dst = self.switches[port_dst.dpid]
         switch_src.linked_status[port_src.port_no] = True
         switch_dst.linked_status[port_dst.port_no] = True
@@ -128,32 +127,35 @@ class SwitchEventHandler(app_manager.RyuApp):
                                      ofp.OFPGT_FF, group_id, buckets_flow)
             datapath.send_msg(mod)
 
+    def dscp_to_exp_mapping(self, dp):
+        parser = dp.ofproto_parser
+        eth_MPLS = ether.ETH_TYPE_MPLS
+        dscp_to_table_values = {0:2, 8:2, 16:2, 24:3, 32:3, 40:3, 48:4, 56:4}
+        tc = 1
+        for table_id in set(dscp_to_table_values.values()):
+            match = parser.OFPMatch(eth_type=eth_MPLS)
+            actions = [parser.OFPActionSetField(mpls_tc=tc)]
+            insts = [dp.ofproto_parser.OFPInstructionActions(
+                     dp.ofproto.OFPIT_APPLY_ACTIONS, actions),
+                     dp.ofproto_parser.OFPInstructionGotoTable(5)]
+            flow_mod = self.create_flow_mod(dp, 100, table_id, match, insts)
+            dp.send_msg(flow_mod)
+            tc += 1
+
+        eth_IP = ether.ETH_TYPE_IP
+        for dscp, table in dscp_to_table_values.items():
+            match = parser.OFPMatch(eth_type=eth_IP, ip_dscp=dscp)
+            actions = [parser.OFPActionPushMpls(eth_MPLS)]
+            insts = [dp.ofproto_parser.OFPInstructionActions(
+                     dp.ofproto.OFPIT_APPLY_ACTIONS, actions),
+                     dp.ofproto_parser.OFPInstructionGotoTable(table)]
+            flow_mod = self.create_flow_mod(dp, 50, 1, match, insts)
+            dp.send_msg(flow_mod)
+
     def create_push_label_flow(self, dp, label, in_port, out_port,
                                dst_port):
-        parser = dp.ofproto_parser
-        ofproto = dp.ofproto
-        eth_MPLS = ether.ETH_TYPE_MPLS
-        eth_IP = ether.ETH_TYPE_IP
-        match = parser.OFPMatch(eth_type=eth_MPLS, eth_dst=dst_port[2])
-        actions = [parser.OFPActionPushMpls(eth_MPLS),
-                   parser.OFPActionSetField(mpls_label=label),
-                   parser.OFPActionOutput(out_port, 0),
-                   parser.OFPActionSetQueue(1)]
-        actions_apply = [parser.OFPActionPopMpls(eth_IP)]
-        insts = [parser.OFPInstructionActions(ofproto.OFPIT_WRITE_ACTIONS,
-                                              actions),
-                 parser.OFPInstructionActions(dp.ofproto.OFPIT_APPLY_ACTIONS,
-                                              actions_apply)]
-        flow_mod = self.create_flow_mod(dp, 0, 2, match, insts)
-        dp.send_msg(flow_mod)
-
-        match = parser.OFPMatch(eth_type=eth_IP)
-        actions = [parser.OFPActionPushMpls(eth_MPLS)]
-        insts = [dp.ofproto_parser.OFPInstructionActions(
-                 dp.ofproto.OFPIT_APPLY_ACTIONS, actions),
-                 dp.ofproto_parser.OFPInstructionGotoTable(2)] 
-        flow_mod = self.create_flow_mod(dp, 0, 1, match, insts)
-        dp.send_msg(flow_mod)
+        self.create_exp_queue_mapping(dp, label, out_port, dst_port)
+        self.dscp_to_exp_mapping(dp)
 
     def create_swap_label_flow(self, dp, prev_label, label, out_port):
         parser = dp.ofproto_parser
@@ -164,8 +166,8 @@ class SwitchEventHandler(app_manager.RyuApp):
                                 mpls_label=prev_label)
         actions = [parser.OFPActionPushMpls(eth_MPLS),
                    parser.OFPActionSetField(mpls_label=label),
-                   parser.OFPActionOutput(out_port, 0),
-                   parser.OFPActionSetQueue(1)]
+                   parser.OFPActionSetQueue(1),
+                   parser.OFPActionOutput(out_port, 0)]
         actions_apply = [parser.OFPActionPopMpls(eth_IP)]
         insts = [parser.OFPInstructionActions(ofproto.OFPIT_WRITE_ACTIONS,
                                               actions),
@@ -187,22 +189,38 @@ class SwitchEventHandler(app_manager.RyuApp):
         flow_mod = self.create_flow_mod(dp, 0, 0, match, insts)
         dp.send_msg(flow_mod)
 
+    def create_exp_queue_mapping(self, dp, label, port_no, dst_port):
+        dscp_values = {1:1, 2:2, 3:3}
+        parser = dp.ofproto_parser
+        ofproto = dp.ofproto
+        eth_MPLS = ether.ETH_TYPE_MPLS
+        for dscp, queue in dscp_values.items():
+            match = parser.OFPMatch(eth_type=eth_MPLS, mpls_tc=dscp,
+                                    eth_dst=dst_port[2])
+            actions = [parser.OFPActionSetField(mpls_label=label),
+                       parser.OFPActionSetQueue(queue),
+                       parser.OFPActionOutput(port_no)]
+            insts = [parser.OFPInstructionActions(
+                    ofproto.OFPIT_APPLY_ACTIONS, actions)]
+            flow_mod = self.create_flow_mod(dp, 100, 5, match, insts)
+            dp.send_msg(flow_mod)
+
     def create_push_mpls_actions(self, dp, label):
         parser = dp.ofproto_parser
         eth_MPLS = ether.ETH_TYPE_MPLS
         actions = [parser.OFPActionPushMpls(eth_MPLS),
                    parser.OFPActionSetField(mpls_label=label[1]),
-                   parser.OFPActionOutput(label[0], 0),
-                   parser.OFPActionSetQueue(1)]
+                   parser.OFPActionSetQueue(1),
+                   parser.OFPActionOutput(label[0], 0)]
         return actions
 
     def create_grouped_push_mpls(self, dp, group_id, dst_port):
         parser = dp.ofproto_parser
-        eth_IP = ether.ETH_TYPE_IP 
+        eth_IP = ether.ETH_TYPE_IP
         match = parser.OFPMatch(eth_type=eth_IP, eth_dst=dst_port[2])
         actions =  [parser.OFPActionGroup(group_id=group_id)]
         insts = [dp.ofproto_parser.OFPInstructionActions(
-                 dp.ofproto.OFPIT_APPLY_ACTIONS, actions)] 
+                 dp.ofproto.OFPIT_APPLY_ACTIONS, actions)]
         flow_mod = self.create_flow_mod(dp, 0, 1, match, insts)
         dp.send_msg(flow_mod)
         self.create_qos_grouped_push_mpls(dp, dst_port, group_id)
@@ -210,21 +228,21 @@ class SwitchEventHandler(app_manager.RyuApp):
     def create_meter_entry(self, dp):
         parser = dp.ofproto_parser
         ofproto = dp.ofproto
-        band = parser.OFPMeterBandDscpRemark(rate=1000, burst_size=1000, prec_level=1)
+        band = parser.OFPMeterBandDscpRemark(rate=1000, burst_size=250, prec_level=1)
         req = parser.OFPMeterMod(dp, ofproto.OFPMC_ADD, ofproto.OFPMF_KBPS, 1, [band])
         dp.send_msg(req)
 
     def create_qos_grouped_push_mpls(self, dp, dst_port, group_id):
         self.create_meter_entry(dp)
         parser = dp.ofproto_parser
-        eth_IP = ether.ETH_TYPE_IP 
+        eth_IP = ether.ETH_TYPE_IP
         match = parser.OFPMatch(eth_type=eth_IP, eth_dst=dst_port[2],
                                 ip_proto=6, tcp_dst=5001)
         actions =  [parser.OFPActionGroup(group_id=group_id)]
         insts = [dp.ofproto_parser.OFPInstructionMeter(1),
                  dp.ofproto_parser.OFPInstructionActions(
-                 dp.ofproto.OFPIT_APPLY_ACTIONS, actions)] 
-        flow_mod = self.create_flow_mod(dp, 100, 1, match, insts)
+                 dp.ofproto.OFPIT_APPLY_ACTIONS, actions)]
+        flow_mod = self.create_flow_mod(dp, 50, 1, match, insts)
         dp.send_msg(flow_mod)
 
     def send_group_flow(self, group, dst_port):
@@ -246,7 +264,7 @@ class SwitchEventHandler(app_manager.RyuApp):
         mod = parser.OFPGroupMod(datapath, ofp.OFPFC_ADD,
                                   ofp.OFPGT_FF, group_id, buckets_flow)
         datapath.send_msg(mod)
-        self.create_grouped_push_mpls(datapath, group_id, dst_port) 
+        self.create_grouped_push_mpls(datapath, group_id, dst_port)
 
     def process_route(self, src_port, dst_port, grouped_flow=False):
         path_list = PathList(self.link_list)
@@ -263,7 +281,7 @@ class SwitchEventHandler(app_manager.RyuApp):
                 label_flows = group_flow['label_flow']
                 last_labels = group_flow['last_label']
             except db.GroupAlreadyExistException:
-                return 
+                return
         else:
             #selected shortest path
             label_flows, last_label = db.fetch_label_flows(path_ids[0][0])
@@ -282,7 +300,7 @@ class SwitchEventHandler(app_manager.RyuApp):
                                             label_flow[2])
         #Pop label entry
         for last_label in last_labels:
-            if last_label != -1: 
+            if last_label != -1:
                 target_switch = self.switches[dst_port[0]].switch
                 self.create_pop_label_flow(target_switch.dp, last_label)
 
@@ -294,16 +312,16 @@ class SwitchEventHandler(app_manager.RyuApp):
 
     def process_end_hw_addr_flows(self, port):
         eth_IP = ether.ETH_TYPE_IP
-        target_switch = self.switches[port[0]] 
+        target_switch = self.switches[port[0]]
         datapath = target_switch.switch.dp
         hw_addr = port[2]
         ofproto = datapath.ofproto
-        actions = [datapath.ofproto_parser.OFPActionOutput(port[1]),
-            datapath.ofproto_parser.OFPActionSetQueue(1)]
+        actions = [datapath.ofproto_parser.OFPActionSetQueue(1),
+            datapath.ofproto_parser.OFPActionOutput(port[1])]
         match = datapath.ofproto_parser.OFPMatch(eth_type=eth_IP, eth_dst=hw_addr)
         inst = [datapath.ofproto_parser.OFPInstructionActions(
                 ofproto.OFPIT_APPLY_ACTIONS, actions)]
-        flow_mod = self.create_flow_mod(datapath, 1, 1, match, inst)
+        flow_mod = self.create_flow_mod(datapath, 100, 1, match, inst)
         datapath.send_msg(flow_mod)
 
     @handler.set_ev_cls(event.EventArpReceived)
@@ -322,14 +340,14 @@ class SwitchEventHandler(app_manager.RyuApp):
             self.process_end_hw_addr_flows(src_port)
             self.process_end_hw_addr_flows(dst_port)
             if src_port[0] != dst_port[0]:
-                self.process_route(src_port, dst_port, True)
-                self.process_route(dst_port, src_port, True)
+                self.process_route(src_port, dst_port, False)
+                self.process_route(dst_port, src_port, False)
             if arppkt.opcode == arp.ARP_REPLY:
                 target_switch = self.switches[dst_port[0]].switch
                 self.arp_packet_out(target_switch.dp, dst_port[1], msg.data)
         except db.ArpTableNotFoundException:
-            pass      
-        
+            pass
+
     def arp_packet_out(self, datapath, port_no, data):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
@@ -339,7 +357,7 @@ class SwitchEventHandler(app_manager.RyuApp):
                                           ofproto.OFPP_CONTROLLER,
                                           [output_port], data)
         datapath.send_msg(packet_out)
-  
+
     def create_flow_mod(self, datapath, priority,
                         table_id, match, instructions):
         """Create OFP flow mod message."""
@@ -352,4 +370,4 @@ class SwitchEventHandler(app_manager.RyuApp):
                                                       OFPG_ANY, 0,
                                                       match, instructions)
         return flow_mod
- 
+
