@@ -79,22 +79,6 @@ class L2Switch(RyuApp):
             self.link_event.set()
             hub.joinall(self.threads)
 
-    def send_flow_stats_request(self, datapath):
-        ofp_parser = datapath.ofproto_parser
-        req = ofp_parser.OFPGroupDescStatsRequest(datapath, 0)
-        if datapath.id == 3:
-            datapath.send_msg(req)
-
-    @set_ev_cls(ofp_event.EventOFPGroupDescStatsReply, MAIN_DISPATCHER)
-    def flow_stats_reply_handler(self, ev):
-        descs = []
-        for stat in ev.msg.body:
-            descs.append('length=%d type=%d group_id=%d '
-                     'buckets=%s' %
-                     (stat.length, stat.type, stat.group_id,
-                      stat.buckets))
-        LOG.debug('GroupDescStats: %s', descs)
-
     def lldp_loop(self):
         while self.is_active:
             self.lldp_event.clear()
@@ -115,7 +99,7 @@ class L2Switch(RyuApp):
                 timeout = expire - now
                 break
             for port in ports_now:
-                self.send_lldp_packet(port.dpid, 
+                self.send_lldp_packet(port.dpid,
                                       port.port_no,
                                       port.hw_addr)
             for port in ports:
@@ -141,8 +125,6 @@ class L2Switch(RyuApp):
                         port_data = self.ports.get_port(src)
                         if port_data.lldp_dropped() > self.LINK_LLDP_DROP:
                             deleted.append(link)
-                #for dp in self.dps.values():
-                    #self.send_queue_get_config_request(dp)
 
             for link in deleted:
                 self.links.link_down(link)
