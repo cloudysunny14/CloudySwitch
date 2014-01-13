@@ -330,8 +330,7 @@ class SwitchEventHandler(app_manager.RyuApp):
         datapath = msg.datapath
         in_port = msg.match['in_port']
         packet = Packet(msg.data)
-        packet.next()
-        arppkt = packet.next()
+        arppkt = packet.get_protocol(arp.arp)
         if arppkt.opcode == arp.ARP_REQUEST:
             self.broadcast_to_end_nodes(msg)
 

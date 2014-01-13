@@ -25,6 +25,7 @@ from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
 from ryu.ofproto.ofproto_v1_2 import OFPG_ANY
 from ryu.ofproto.ofproto_v1_3 import OFP_VERSION
 from ryu.lib.mac import DONTCARE_STR
+from ryu.lib.packet import ethernet
 from ryu.ofproto.ether import ETH_TYPE_LLDP
 from ryu.ofproto import ether
 from ryu.lib.packet.packet import Packet
@@ -47,7 +48,7 @@ class L2Switch(RyuApp):
                event.EventArpReceived]
 
     OFP_VERSIONS = [OFP_VERSION]
-    
+
     DEFAULT_TTL = 120  # unused. ignored.
     LLDP_PACKET_LEN = len(LLDPPacket.lldp_packet(0, 0, DONTCARE_STR, 0))
 
@@ -70,7 +71,7 @@ class L2Switch(RyuApp):
         self.threads.append(hub.spawn(self.lldp_loop))
         self.threads.append(hub.spawn(self.link_loop))
         self.link_discovery = True
-    
+
     def close(self):
         self.is_active = False
         if self.link_discovery:
@@ -126,7 +127,7 @@ class L2Switch(RyuApp):
             if timeout is not None and ports:
                 timeout = 0     # We have already slept
             self.lldp_event.wait(timeout=timeout)
-  
+
     def link_loop(self):
         while self.is_active:
             self.link_event.clear()
@@ -189,7 +190,7 @@ class L2Switch(RyuApp):
         self.port_state[dp.id] = PortState()
         for port in dp.ports.values():
             self.port_state[dp.id].add(port.port_no, port)
-        
+
     def _link_down(self, port):
         try:
             dst, rev_link_dst = self.links.port_deleted(port)
@@ -309,7 +310,7 @@ class L2Switch(RyuApp):
             if not port.is_reserved():
                 self._port_added(port)
         self.lldp_event.set()
-        
+
     def create_flow_mod(self, datapath, priority,
                         table_id, match, instructions):
         """Create OFP flow mod message."""
@@ -322,7 +323,7 @@ class L2Switch(RyuApp):
                                                       OFPG_ANY, 0,
                                                       match, instructions)
         return flow_mod
-    
+
     def install_table_miss(self, datapath, table_id):
         """Create and install table miss flow entries."""
         parser = datapath.ofproto_parser
@@ -338,7 +339,7 @@ class L2Switch(RyuApp):
                                         match, instructions)
         datapath.send_msg(flow_mod)
         self.send_barrier_request(datapath)
-    
+
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
         """Handle packet_in events."""
@@ -347,7 +348,7 @@ class L2Switch(RyuApp):
         msg = ev.msg
         in_port = msg.match['in_port']
         packet = Packet(msg.data)
-        efm = packet.next()
+        efm = packet.get_protocol(ethernet.ethernet)
         if efm.ethertype == ether.ETH_TYPE_ARP:
             self.send_event_to_observers(event.EventArpReceived(ev))
 
