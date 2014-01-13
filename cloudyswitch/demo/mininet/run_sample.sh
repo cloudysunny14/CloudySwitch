@@ -43,8 +43,8 @@ run_ryu() {
 # starting mininet and test-script
 run_mn() {
     echo "Info: mininet starting..."
-    sudo mn --pre $MN_PRE_FILE --post $MN_POST_FILE --switch user --controller remote --custom sample_topology.py --topo mytopo
-
+    #sudo mn --pre $MN_PRE_FILE --post $MN_POST_FILE --switch user --controller remote --custom sample_topology.py --topo mytopo
+    sudo python qos_test.py
 }
 
 # cleaning after mininet
