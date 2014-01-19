@@ -70,6 +70,22 @@ class SwitchEventHandler(app_manager.RyuApp):
         flow_mod = self.create_flow_mod(datapath, 0, 0,
                                         match, instructions)
         datapath.send_msg(flow_mod)
+        self.send_meter_entry(datapath)
+
+    def send_meter_entry(self, datapath):
+        parser = datapath.ofproto_parser
+        ofproto = datapath.ofproto
+        band = parser.OFPMeterBandDscpRemark(rate=1000, burst_size=250, prec_level=1)
+        req = parser.OFPMeterMod(datapath, ofproto.OFPMC_ADD,
+                                 ofproto.OFPMF_KBPS, 1, [band])
+        datapath.send_msg(req)
+        eth_IP = ether.ETH_TYPE_IP
+        match = parser.OFPMatch(eth_type=eth_IP)
+        instructions = [parser.OFPInstructionMeter(1),
+                        parser.OFPInstructionGotoTable(2)]
+        flow_mod = self.create_flow_mod(datapath, 0, 1,
+                                        match, instructions)
+        datapath.send_msg(flow_mod)
 
     @handler.set_ev_cls(event.EventSwitchEnter)
     def switch_enter_handler(self, event):
@@ -130,14 +146,14 @@ class SwitchEventHandler(app_manager.RyuApp):
     def dscp_to_exp_mapping(self, dp):
         parser = dp.ofproto_parser
         eth_MPLS = ether.ETH_TYPE_MPLS
-        dscp_to_table_values = {0:2, 8:2, 16:2, 24:3, 32:3, 40:3, 48:4, 56:4}
+        dscp_to_table_values = {0:3, 8:3, 16:3, 24:4, 32:4, 40:4, 48:5, 56:5}
         tc = 1
         for table_id in set(dscp_to_table_values.values()):
             match = parser.OFPMatch(eth_type=eth_MPLS)
             actions = [parser.OFPActionSetField(mpls_tc=tc)]
             insts = [dp.ofproto_parser.OFPInstructionActions(
                      dp.ofproto.OFPIT_APPLY_ACTIONS, actions),
-                     dp.ofproto_parser.OFPInstructionGotoTable(5)]
+                     dp.ofproto_parser.OFPInstructionGotoTable(6)]
             flow_mod = self.create_flow_mod(dp, 100, table_id, match, insts)
             dp.send_msg(flow_mod)
             tc += 1
@@ -149,7 +165,7 @@ class SwitchEventHandler(app_manager.RyuApp):
             insts = [dp.ofproto_parser.OFPInstructionActions(
                      dp.ofproto.OFPIT_APPLY_ACTIONS, actions),
                      dp.ofproto_parser.OFPInstructionGotoTable(table)]
-            flow_mod = self.create_flow_mod(dp, 50, 1, match, insts)
+            flow_mod = self.create_flow_mod(dp, 50, 2, match, insts)
             dp.send_msg(flow_mod)
 
     def create_push_mpls_flow(self, dp, group_id, dst_port):
@@ -184,7 +200,7 @@ class SwitchEventHandler(app_manager.RyuApp):
         actions = [parser.OFPActionPopMpls(eth_IP)]
         insts = [parser.OFPInstructionActions(dp.ofproto.OFPIT_APPLY_ACTIONS,
                                               actions),
-                 parser.OFPInstructionGotoTable(1)]
+                 parser.OFPInstructionGotoTable(7)]
         flow_mod = self.create_flow_mod(dp, 0, 0, match, insts)
         dp.send_msg(flow_mod)
 
@@ -200,7 +216,7 @@ class SwitchEventHandler(app_manager.RyuApp):
                        parser.OFPActionGroup(group_id=group_id)]
             insts = [parser.OFPInstructionActions(
                     ofproto.OFPIT_APPLY_ACTIONS, actions)]
-            flow_mod = self.create_flow_mod(dp, 100, 5, match, insts)
+            flow_mod = self.create_flow_mod(dp, 100, 6, match, insts)
             dp.send_msg(flow_mod)
 
     def create_push_mpls_actions(self, dp, label):
@@ -274,15 +290,19 @@ class SwitchEventHandler(app_manager.RyuApp):
         eth_IP = ether.ETH_TYPE_IP
         target_switch = self.switches[port[0]]
         datapath = target_switch.switch.dp
-        hw_addr = port[2]
-        ofproto = datapath.ofproto
-        actions = [datapath.ofproto_parser.OFPActionSetQueue(1),
-            datapath.ofproto_parser.OFPActionOutput(port[1])]
-        match = datapath.ofproto_parser.OFPMatch(eth_type=eth_IP, eth_dst=hw_addr)
-        inst = [datapath.ofproto_parser.OFPInstructionActions(
-                ofproto.OFPIT_APPLY_ACTIONS, actions)]
-        flow_mod = self.create_flow_mod(datapath, 100, 1, match, inst)
-        datapath.send_msg(flow_mod)
+        dscp_to_queue_values = {0:1, 8:1, 16:1, 24:2, 32:2, 40:2, 48:3, 56:3}
+        for dscp, queue in dscp_to_queue_values.items():
+            hw_addr = port[2]
+            ofproto = datapath.ofproto
+            actions = [datapath.ofproto_parser.OFPActionSetQueue(queue),
+                       datapath.ofproto_parser.OFPActionOutput(port[1])]
+            match = datapath.ofproto_parser.OFPMatch(eth_type=eth_IP,
+                                                     ip_dscp=dscp,
+                                                     eth_dst=hw_addr)
+            inst = [datapath.ofproto_parser.OFPInstructionActions(
+                    ofproto.OFPIT_APPLY_ACTIONS, actions)]
+            flow_mod = self.create_flow_mod(datapath, 100, 7, match, inst)
+            datapath.send_msg(flow_mod)
 
     @handler.set_ev_cls(event.EventArpReceived)
     def arp_received_handler(self, ev):
