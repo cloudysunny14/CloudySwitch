@@ -65,8 +65,9 @@ class SwitchEventHandler(app_manager.RyuApp):
         flow_mod = self.create_flow_mod(datapath, 0, 0,
                                         match, instructions)
         datapath.send_msg(flow_mod)
-        match = parser.OFPMatch(eth_type=eth_IP)
-        instructions = [parser.OFPInstructionGotoTable(1)]
+        #For Best Effort Class(Default)
+        match = parser.OFPMatch(eth_type=eth_IP, ip_dscp=0)
+        instructions = [parser.OFPInstructionGotoTable(2)]
         flow_mod = self.create_flow_mod(datapath, 0, 0,
                                         match, instructions)
         datapath.send_msg(flow_mod)
@@ -75,17 +76,23 @@ class SwitchEventHandler(app_manager.RyuApp):
     def send_meter_entry(self, datapath):
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
-        band = parser.OFPMeterBandDscpRemark(rate=1000, burst_size=250, prec_level=1)
+        band = parser.OFPMeterBandDscpRemark(rate=500, burst_size=5, prec_level=2)
         req = parser.OFPMeterMod(datapath, ofproto.OFPMC_ADD,
                                  ofproto.OFPMF_KBPS, 1, [band])
         datapath.send_msg(req)
         eth_IP = ether.ETH_TYPE_IP
-        match = parser.OFPMatch(eth_type=eth_IP)
+        match = parser.OFPMatch(eth_type=eth_IP, ip_dscp=24)
         instructions = [parser.OFPInstructionMeter(1),
                         parser.OFPInstructionGotoTable(2)]
         flow_mod = self.create_flow_mod(datapath, 0, 1,
                                         match, instructions)
         datapath.send_msg(flow_mod)
+        # Policing for Scavenger class
+        band = parser.OFPMeterBandDrop(rate=100,
+                                       burst_size=5)
+        req = parser.OFPMeterMod(datapath, ofproto.OFPMC_ADD,
+                                 ofproto.OFPMF_KBPS, 2, [band])
+        datapath.send_msg(req)
 
     @handler.set_ev_cls(event.EventSwitchEnter)
     def switch_enter_handler(self, event):
@@ -212,10 +219,11 @@ class SwitchEventHandler(app_manager.RyuApp):
         for dscp, queue in dscp_values.items():
             match = parser.OFPMatch(eth_type=eth_MPLS, mpls_tc=dscp,
                                     eth_dst=dst_port[2])
-            actions = [parser.OFPActionSetQueue(queue),
-                       parser.OFPActionGroup(group_id=group_id)]
-            insts = [parser.OFPInstructionActions(
-                    ofproto.OFPIT_APPLY_ACTIONS, actions)]
+            #actions_write = [parser.OFPActionSetQueue(queue)]
+            actions_apply = [parser.OFPActionSetQueue(queue),
+                             parser.OFPActionGroup(group_id=group_id)]
+            insts = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS,
+                                                  actions_apply)]
             flow_mod = self.create_flow_mod(dp, 100, 6, match, insts)
             dp.send_msg(flow_mod)
 
@@ -291,16 +299,20 @@ class SwitchEventHandler(app_manager.RyuApp):
         target_switch = self.switches[port[0]]
         datapath = target_switch.switch.dp
         dscp_to_queue_values = {0:1, 8:1, 16:1, 24:2, 32:2, 40:2, 48:3, 56:3}
+        SCAVENGER = 8
         for dscp, queue in dscp_to_queue_values.items():
             hw_addr = port[2]
             ofproto = datapath.ofproto
-            actions = [datapath.ofproto_parser.OFPActionSetQueue(queue),
-                       datapath.ofproto_parser.OFPActionOutput(port[1])]
+            parser = datapath.ofproto_parser
+            actions = [parser.OFPActionSetQueue(queue),
+                       parser.OFPActionOutput(port[1])]
             match = datapath.ofproto_parser.OFPMatch(eth_type=eth_IP,
                                                      ip_dscp=dscp,
                                                      eth_dst=hw_addr)
-            inst = [datapath.ofproto_parser.OFPInstructionActions(
+            inst = [parser.OFPInstructionActions(
                     ofproto.OFPIT_APPLY_ACTIONS, actions)]
+            if dscp == SCAVENGER:
+                inst.insert(0, parser.OFPInstructionMeter(2))
             flow_mod = self.create_flow_mod(datapath, 100, 7, match, inst)
             datapath.send_msg(flow_mod)
 
